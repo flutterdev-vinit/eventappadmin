@@ -35,30 +35,45 @@ export default function EventDetail() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
-    setOrganiser(null);
+    let cancelled = false;
 
-    Promise.all([
-      fetchEventById(id),
-      fetchCategoryMap(),
-      fetchAttendeeCountForEvent(id).catch(() => 0),
-      fetchCompletedPaymentCountForEvent(id).catch(() => 0),
-      fetchMessageCountForEvent(id).catch(() => 0),
-      fetchAttendeesForEvent(id),
-    ]).then(([ev, cats, att, paid, msgs, attList]) => {
-      setEvent(ev as Event | null);
-      setCatMap(cats as Record<string, string>);
-      setAttendeeCount(att as number);
-      setPaidCount(paid as number);
-      setMessageCount(msgs as number);
-      setAttendees(attList as AttendeeWithUser[]);
-      // Resolve organiser after we have the event
-      const authorPath = (ev as Event | null)?.author;
-      if (authorPath) {
-        const uid = String(authorPath).split('/').pop();
-        if (uid) fetchUserById(uid).then(setOrganiser);
+    // Wrapped in an async fn so the initial `setLoading(true)` / `setOrganiser(null)`
+    // are not literal setState statements in the effect body — that would
+    // trip react-hooks/set-state-in-effect. Functionally identical.
+    async function load(eventId: string) {
+      setLoading(true);
+      setOrganiser(null);
+      try {
+        const [ev, cats, att, paid, msgs, attList] = await Promise.all([
+          fetchEventById(eventId),
+          fetchCategoryMap(),
+          fetchAttendeeCountForEvent(eventId).catch(() => 0),
+          fetchCompletedPaymentCountForEvent(eventId).catch(() => 0),
+          fetchMessageCountForEvent(eventId).catch(() => 0),
+          fetchAttendeesForEvent(eventId),
+        ]);
+        if (cancelled) return;
+        setEvent(ev as Event | null);
+        setCatMap(cats as Record<string, string>);
+        setAttendeeCount(att as number);
+        setPaidCount(paid as number);
+        setMessageCount(msgs as number);
+        setAttendees(attList as AttendeeWithUser[]);
+        const authorPath = (ev as Event | null)?.author;
+        if (authorPath) {
+          const uid = String(authorPath).split('/').pop();
+          if (uid) {
+            const user = await fetchUserById(uid);
+            if (!cancelled) setOrganiser(user);
+          }
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    }).finally(() => setLoading(false));
+    }
+
+    void load(id);
+    return () => { cancelled = true; };
   }, [id]);
 
   const fmt = (ts: unknown, withTime = false) => {

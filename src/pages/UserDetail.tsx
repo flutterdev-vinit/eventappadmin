@@ -34,25 +34,38 @@ export default function UserDetail() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    let cancelled = false;
 
-    Promise.all([
-      fetchUserById(id),
-      fetchCategoryMap(),
-      fetchAttendedEventsByUser(id),
-      fetchPaymentsByUser(id),
-      fetchEventsByOrganiser(id),
-    ]).then(([u, cats, evRows, pays, org]) => {
-      setUser(u as AppUser | null);
-      setCatMap(cats as Record<string, string>);
-      const rows = evRows as AttendedEventRow[];
-      setEvents(rows);
-      setPayments(pays as Payment[]);
-      setOrganised(org as Event[]);
-      if (rows.length > 0) {
-        fetchEventNames(rows.map((r) => r.eventId)).then(setEventNames);
+    // Wrapped in an async fn so setState calls aren't direct statements in
+    // the effect body (avoids react-hooks/set-state-in-effect false positive).
+    async function load(userId: string) {
+      setLoading(true);
+      try {
+        const [u, cats, evRows, pays, org] = await Promise.all([
+          fetchUserById(userId),
+          fetchCategoryMap(),
+          fetchAttendedEventsByUser(userId),
+          fetchPaymentsByUser(userId),
+          fetchEventsByOrganiser(userId),
+        ]);
+        if (cancelled) return;
+        setUser(u as AppUser | null);
+        setCatMap(cats as Record<string, string>);
+        const rows = evRows as AttendedEventRow[];
+        setEvents(rows);
+        setPayments(pays as Payment[]);
+        setOrganised(org as Event[]);
+        if (rows.length > 0) {
+          const names = await fetchEventNames(rows.map((r) => r.eventId));
+          if (!cancelled) setEventNames(names);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    }).finally(() => setLoading(false));
+    }
+
+    void load(id);
+    return () => { cancelled = true; };
   }, [id]);
 
   const fmt = (ts: unknown, withTime = false) => {

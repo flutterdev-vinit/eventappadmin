@@ -121,13 +121,13 @@ export function useEventsPage(): UseEventsPageReturn {
 
   // Reload page 1 whenever status or debouncedMode changes.
   // Single effect avoids the double-load bug where two effects both call loadPage on mount.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // `loadPage` is a stable useCallback(deps: []) so this effect only fires when
+  // the filter values actually change.
   useEffect(() => {
     if (searchModeRef.current) return;
     cursors.current = [null];
-    setPageNum(1);
     loadPage(1);
-  }, [status, debouncedMode]);
+  }, [status, debouncedMode, loadPage]);
 
   // ── Enter-to-search: fires a cross-page Firestore prefix query ───────────
   const triggerSearch = useCallback(async () => {

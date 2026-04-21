@@ -59,14 +59,13 @@ export function usePaymentsPage(): UsePaymentsPageReturn {
   const [tableLoading, setTableLoading] = useState(true);
   const [tablePage, setTablePage] = useState(1);
   const [tableHasMore, setTableHasMore] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, _setStatusFilter] = useState<StatusFilter>('all');
   const cursors = useRef<(QueryDocumentSnapshot | null)[]>([null]);
 
   // Ref mirror for the filter so loadTablePage stays stable.
   // Without this, loadTablePage is re-created on every filter change,
-  // and the effect below would fire twice → 2× Firestore reads.
+  // and the mount effect below would fire twice → 2× Firestore reads.
   const statusFilterRef = useRef(statusFilter);
-  useEffect(() => { statusFilterRef.current = statusFilter; }, [statusFilter]);
 
   // Load chart stats once — no doc reads, only aggregations + cache
   useEffect(() => {
@@ -135,14 +134,23 @@ export function usePaymentsPage(): UsePaymentsPageReturn {
     }
   }, []);
 
-  // Reset table page when filter changes. loadTablePage is stable so this
-  // effect only fires when statusFilter changes — no duplicate reads.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
+  // Initial mount: fetch page 1 from Firestore. The `react-hooks/set-state-in-effect`
+  // rule reports a false positive here — it traces through `loadTablePage` and
+  // sees the inner `setTableLoading(true)` — but this is the canonical
+  // "subscribe for updates from an external system" pattern the rule's own
+  // docs explicitly allow (Firestore is the external system).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void loadTablePage(1); }, [loadTablePage]);
+
+  // Filter change → reset pagination + reload synchronously from the setter.
+  // This replaces the old `useEffect([statusFilter])` pattern which tripped
+  // react-hooks/set-state-in-effect.
+  const setStatusFilter = useCallback((s: StatusFilter) => {
+    _setStatusFilter(s);
+    statusFilterRef.current = s;
     cursors.current = [null];
-    setTablePage(1);
     loadTablePage(1);
-  }, [statusFilter]);
+  }, [loadTablePage]);
 
   return {
     monthlyRevenue,

@@ -199,6 +199,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ─── Admin client-error log ───────────────────────────────────────────────
+    // Same shape as _admin_audit: append-only, admin-only, 90-day TTL on
+    // `expiresAt`. Used by the web admin's ErrorBoundary and window error
+    // listeners to capture uncaught exceptions for post-mortem.
+    match /_admin_errors/{errorId} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
     // ─── Collection-group support for admin queries ───────────────────────────
     // Admin dashboard runs collectionGroup('attendees') / ('chat_messages')
     // to answer cross-event queries (e.g. "events this user attended").

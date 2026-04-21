@@ -1,18 +1,23 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import AuthGate from './components/AuthGate';
 import Sidebar from './components/Sidebar';
-import Dashboard from './pages/Dashboard';
-import Events from './pages/Events';
-import EventDetail from './pages/EventDetail';
-import Users from './pages/Users';
-import UserDetail from './pages/UserDetail';
-import Payments from './pages/Payments';
-import Messages from './pages/Messages';
-import Analytics from './pages/Analytics';
+import PageLoader from './components/PageLoader';
 import Login from './pages/Login';
 import { useWindowSize } from './hooks/useWindowSize';
+
+// Route-level code splitting — each page becomes its own JS chunk, fetched
+// on first navigation. Login + AuthGate + Sidebar stay eager because they
+// render before the first route and determine whether anything else loads.
+const Dashboard   = lazy(() => import('./pages/Dashboard'));
+const Events      = lazy(() => import('./pages/Events'));
+const EventDetail = lazy(() => import('./pages/EventDetail'));
+const Users       = lazy(() => import('./pages/Users'));
+const UserDetail  = lazy(() => import('./pages/UserDetail'));
+const Payments    = lazy(() => import('./pages/Payments'));
+const Messages    = lazy(() => import('./pages/Messages'));
+const Analytics   = lazy(() => import('./pages/Analytics'));
 
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -57,16 +62,18 @@ export default function App() {
             padding: isMobile ? '16px 16px 40px' : '32px 32px 48px',
             overflowX: 'hidden',
           }}>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/events" element={<Events />} />
-              <Route path="/events/:id" element={<EventDetail />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/users/:id" element={<UserDetail />} />
-              <Route path="/payments" element={<Payments />} />
-              <Route path="/messages" element={<Messages />} />
-              <Route path="/analytics" element={<Analytics />} />
-            </Routes>
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/events" element={<Events />} />
+                <Route path="/events/:id" element={<EventDetail />} />
+                <Route path="/users" element={<Users />} />
+                <Route path="/users/:id" element={<UserDetail />} />
+                <Route path="/payments" element={<Payments />} />
+                <Route path="/messages" element={<Messages />} />
+                <Route path="/analytics" element={<Analytics />} />
+              </Routes>
+            </Suspense>
           </main>
         </div>
       </div>

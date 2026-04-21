@@ -69,3 +69,8 @@ export {
   type AuditActionType,
   type AuditEntry,
 } from './audit';
+
+export {
+  logClientError,
+  type ClientErrorContext,
+} from './errors';

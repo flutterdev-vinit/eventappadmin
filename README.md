@@ -151,20 +151,38 @@ npm run preview
 
 ## Deploy (Firebase)
 
-Ensure the CLI targets the right project (`firebase use` / `.firebaserc`).
+### Preferred path: CI-managed deploys
 
-Typical full deploy for this app:
+GitHub Actions owns deploys. Any push to `main` triggers:
+
+1. **`.github/workflows/ci.yml`** — `npm ci` → `npm run lint` → `npm test -- --run` → `npm run build`. Runs on every PR *and* every push to `main`; a failure blocks merge.
+2. **`.github/workflows/deploy.yml`** — runs only after CI succeeds on `main`. Deploys **rules** first (compilation-gated), then **hosting**. The workflow **never passes `--force`** — the 84 composite indexes remain under manual operator control.
+
+Successful deploys surface in the Actions tab; a failed rules compile stops the pipeline before hosting is touched.
+
+### First-time setup (once per repo)
+
+1. Firebase console → **Project settings** → **Service accounts** → **Generate new private key**. Save the JSON.
+2. GitHub → repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+   - Name: `FIREBASE_SERVICE_ACCOUNT_EVENT_APP`
+   - Value: the full JSON contents.
+3. In GCP IAM, grant that service account:
+   - `Cloud Datastore User`
+   - `Firebase Admin SDK Administrator Service Agent`
+   - `Firebase Hosting Admin`
+
+**Rotate the service-account key** at least every 90 days: generate a new one, update the GitHub secret, then delete the old key from Firebase console.
+
+### Break-glass manual deploy
+
+Only if CI is broken or you need to deploy from your laptop:
 
 ```bash
 npm run build
-firebase deploy --only firestore:rules,firestore:indexes,hosting
+firebase deploy --only firestore:rules,hosting
 ```
 
-- **`firestore:rules`** — Live rules; must stay compatible with the Flutter app.
-- **`firestore:indexes`** — Composite indexes; first-time index builds can take minutes in the console.
-- **`hosting`** — Uploads **`dist/`** after you build.
-
-The **`deploy`** script in **`package.json`** runs build + hosting only; add rules/indexes when you change them.
+**Never** run `firebase deploy --only firestore:indexes --force` — this wipes all console-managed indexes. If an index needs changing, edit `firestore.indexes.json`, diff with `firebase firestore:indexes`, then deploy with `--only firestore:indexes` (no `--force`).
 
 **Never commit** `.env`, service account JSON files, or private keys—see **`.gitignore`**.
 
@@ -209,6 +227,7 @@ Granting admin access in **production** should be a deliberate, audited step (Ad
 | `admin` (FF legacy) | signed-in create; admin edit | public |
 | `_admin/**` | admin | admin |
 | `_admin_audit` | admin create; append-only | admin |
+| `_admin_errors` | admin create; append-only | admin |
 
 ---
 
@@ -257,6 +276,48 @@ curl -X PATCH \
 ```
 
 To **view recent audit entries** from the Firebase console: Firestore → `_admin_audit` → sort by `createdAt` desc. A dedicated in-app viewer page is a good next step if forensic needs grow.
+
+### Error tracking (`_admin_errors`)
+
+Uncaught exceptions thrown inside the admin web app are written to `_admin_errors/{auto-id}` from three entry points:
+
+- **React render errors** — caught by the top-level `ErrorBoundary` (`components/ErrorBoundary.tsx`).
+- **Synchronous/script errors** — `window.addEventListener('error', …)` in `main.tsx`.
+- **Unhandled promise rejections** — `window.addEventListener('unhandledrejection', …)` in `main.tsx`.
+
+Each document has the shape:
+
+```typescript
+{
+  message: string,          // truncated to 1 KB
+  stack: string,            // truncated to 4 KB
+  source: 'boundary' | 'window.error' | 'unhandledrejection' | custom,
+  extras: Record<string, unknown>,
+  url: string,
+  userAgent: string,
+  actor: { uid, email, name },
+  createdAt: Timestamp,
+  expiresAt: Timestamp,     // createdAt + 90 days
+}
+```
+
+**Retention: 90 days.** A Firestore TTL policy on the `expiresAt` field deletes stale entries. Rules mirror `_admin_audit` — admin-only create/read, no update/delete.
+
+To **verify / (re)create** the TTL policy (first-time setup, or after a restore):
+
+```bash
+TOKEN=$(node -e "console.log(require(require('os').homedir()+'/.config/configstore/firebase-tools.json').tokens.access_token)")
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://firestore.googleapis.com/v1/projects/event-app-880a3/databases/(default)/collectionGroups/_admin_errors/fields/expiresAt"
+
+curl -X PATCH \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "https://firestore.googleapis.com/v1/projects/event-app-880a3/databases/(default)/collectionGroups/_admin_errors/fields/expiresAt?updateMask=ttlConfig" \
+  -d '{"ttlConfig":{}}'
+```
+
+`logClientError` is fire-and-forget — if Firestore is unreachable, it logs a `console.warn` but never throws, so a broken logger can't itself crash the app.
 
 ---
 
