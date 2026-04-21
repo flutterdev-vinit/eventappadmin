@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── helpers ──────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // Returns true if the current user is the document author.
+    // The `author` field is stored as a Firestore DocumentReference path
+    // (e.g. /databases/(default)/documents/users/<uid>).
+    function isEventAuthor(eventData) {
+      return isSignedIn() &&
+        eventData.author == /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    // ─── Events ───────────────────────────────────────────────────────────────
+    // Regular users:
+    //   - Can create their own events (draft or published)
+    //   - Can read their own events (any status) + all published events
+    //   - Can update/delete only their own events
+    // Admin: full access
+    match /Event/{eventId} {
+      allow create: if isSignedIn();
+      allow read:   if isAdmin()
+                    || isEventAuthor(resource.data)
+                    || resource.data.is_published == true;
+      allow update: if isAdmin() || isEventAuthor(resource.data);
+      allow delete: if isAdmin() || isEventAuthor(resource.data);
+
+      // Chat messages: any signed-in user can read/post; only admin or message
+      // sender can delete
+      match /chat_messages/{msgId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isAdmin();
+        allow delete: if isAdmin()
+                      || (isSignedIn() &&
+                          resource.data.sender_ref ==
+                            /databases/$(database)/documents/users/$(request.auth.uid));
+      }
+
+      // Attendees: users can register themselves; admin manages all
+      // user_id may be stored as a plain UID string or a DocumentReference.
+      match /attendees/{attendeeId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isAdmin()
+                      || (isSignedIn() && resource.data.user_id == request.auth.uid)
+                      || (isSignedIn() && resource.data.user_id == /databases/$(database)/documents/users/$(request.auth.uid));
+        allow delete: if isAdmin()
+                      || (isSignedIn() && resource.data.user_id == request.auth.uid)
+                      || (isSignedIn() && resource.data.user_id == /databases/$(database)/documents/users/$(request.auth.uid));
+      }
+    }
+
+    // ─── Payments ─────────────────────────────────────────────────────────────
+    // Payment documents are created by the app (or a Cloud Function).
+    // The user who made the payment can read it; admin can read + write all.
+    // userId may be stored as a plain UID string OR as a DocumentReference
+    // (Flutter SDK stores refs as DocumentReference objects). Both forms are
+    // checked so payment history works regardless of how the mobile app writes it.
+    match /payment/{paymentId} {
+      allow read:   if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid)
+                    || (isSignedIn() && resource.data.userId == /databases/$(database)/documents/users/$(request.auth.uid));
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── User profiles ────────────────────────────────────────────────────────
+    // Users read/update their own profile; admin sees + manages all.
+    match /users/{userId} {
+      allow read:   if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+
+    // ─── Event categories ─────────────────────────────────────────────────────
+    // Publicly readable — Flutter app needs this to populate category pickers
+    // and the admin UI resolves category names from this collection.
+    match /event_category/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Admin-only internal docs ──────────────────────────────────────────────
+    // The _admin collection is used only by this admin UI for caching stats.
+    // Regular app users must never read or write these documents.
+    match /_admin/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ─── Deny everything else ─────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
