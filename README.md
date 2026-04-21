@@ -166,10 +166,22 @@ Successful deploys surface in the Actions tab; a failed rules compile stops the 
 2. GitHub → repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
    - Name: `FIREBASE_SERVICE_ACCOUNT_EVENT_APP`
    - Value: the full JSON contents.
-3. In GCP IAM, grant that service account:
-   - `Cloud Datastore User`
-   - `Firebase Admin SDK Administrator Service Agent`
-   - `Firebase Hosting Admin`
+3. In GCP IAM, grant that service account **all three** of the following roles (the default "Firebase Admin SDK Administrator Service Agent" does NOT include rules-deploy permissions, so the extras are required):
+   - `Firebase Rules Admin`  (`roles/firebaserules.admin`) — deploy `firestore.rules`
+   - `Firebase Hosting Admin` (`roles/firebasehosting.admin`) — deploy `/dist` to hosting
+   - `Cloud Datastore User`  (`roles/datastore.user`) — needed by the rules compiler to run the `:test` preflight
+
+   Quick CLI alternative (requires `gcloud` authed as Owner):
+
+   ```bash
+   SA=firebase-adminsdk-cc347@event-app-880a3.iam.gserviceaccount.com
+   for role in roles/firebaserules.admin roles/firebasehosting.admin roles/datastore.user; do
+     gcloud projects add-iam-policy-binding event-app-880a3 \
+       --member="serviceAccount:$SA" --role="$role" --condition=None
+   done
+   ```
+
+   IAM changes can take 1–2 minutes to propagate before the next deploy attempt succeeds.
 
 **Rotate the service-account key** at least every 90 days: generate a new one, update the GitHub secret, then delete the old key from Firebase console.
 

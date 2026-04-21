@@ -19,6 +19,13 @@ concurrency:
   group: deploy-main
   cancel-in-progress: false
 
+# `FirebaseExtended/action-hosting-deploy@v0` is still shipped as a Node.js 20
+# action (no Node 24 tag has been published yet). GitHub's runners will reject
+# Node 20 actions starting 2026-06-02, so we opt into the Node 24 shim now —
+# the official workaround published in the deprecation notice.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   deploy:
     name: Firebase deploy (rules + hosting)
