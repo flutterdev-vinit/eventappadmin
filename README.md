@@ -26,7 +26,7 @@ flowchart LR
   subgraph client [Browser SPA]
     UI[React pages]
     Gate[AuthGate]
-    FS[lib/firestore.ts]
+    FS[lib/firestore]
     UI --> Gate
     Gate --> UI
     UI --> FS
@@ -43,8 +43,8 @@ flowchart LR
 
 1. **`firebase.ts`** — Initializes the Firebase app from **`VITE_*` env vars** (see below).
 2. **`AuthGate`** — Wraps the app. After sign-in, if `VITE_ENFORCE_ADMIN_CLAIM=true`, the user must have JWT custom claim **`admin: true`**. Otherwise Firestore security rules will block reads anyway for non-admin users.
-3. **`lib/firestore.ts`** — Central place for Firestore access: pagination, aggregations, category maps, batch name resolution, analytics cache helpers. **New screens should extend patterns here** rather than duplicating queries ad hoc in pages.
-4. **Pages** — Route-level UI only; they call `lib/firestore.ts` and render tables/charts.
+3. **`lib/firestore/`** — Firestore access split by domain (`events.ts`, `users.ts`, `payments.ts`, `messages.ts`, `adminCache.ts`, plus `sanitize.ts` / `pagination.ts`); **`lib/firestore/index.ts`** re-exports a single import path (`from '../lib/firestore'`). **`lib/dateUtils.ts`** holds shared chart/date helpers.
+4. **Pages** — Route-level UI only; they call `lib/firestore` and render tables/charts.
 
 **Deployed shape:** Vite builds static assets to **`dist/`**. **Firebase Hosting** serves `dist` with SPA fallback (`**` → `index.html`). **Firestore rules** and **indexes** are deployed separately (`firebase deploy`).
 
@@ -71,11 +71,12 @@ admin/
     ├── components/       # AuthGate, Sidebar, tables, shared UI
     ├── hooks/            # useDebounce, usePagination, useWindowSize
     ├── lib/
-    │   └── firestore.ts  # All Firestore reads/writes used by the admin UI
+    │   ├── firestore/    # Domain modules + index.ts barrel
+    │   └── dateUtils.ts # Shared Firestore timestamp + chart bucket helpers
     └── pages/           # Dashboard, Events, EventDetail, Users, UserDetail, …
 ```
 
-**Rule of thumb:** business logic for “what to query” lives in **`lib/firestore.ts`**; **pages** focus on state, loading UX, and presentation.
+**Rule of thumb:** business logic for “what to query” lives in **`lib/firestore/`**; **pages** focus on state, loading UX, and presentation.
 
 ---
 
@@ -184,8 +185,78 @@ Granting admin access in **production** should be a deliberate, audited step (Ad
 ## Relationship to the mobile app
 
 - **Same Firestore database** and **same Auth project** as Flutter.
-- Schema assumptions (collection names, field shapes, `DocumentReference` vs string IDs) are implemented in **`lib/firestore.ts`** with fallbacks where data is inconsistent.
+- Schema assumptions (collection names, field shapes, `DocumentReference` vs string IDs) are implemented in **`lib/firestore/`** with fallbacks where data is inconsistent.
 - **Changing Firestore rules** here affects **all clients** immediately after deploy—coordinate with mobile releases when tightening rules.
+
+### Collections the rules cover
+
+`firestore.rules` explicitly allows the following collections. If the mobile app adds a new collection, **add a rule for it first** — the file ends with `match /{document=**} { allow read, write: if false; }`.
+
+| Collection | Who can write | Who can read |
+|---|---|---|
+| `Event` + `/attendees` + `/chat_messages` | author / admin | signed-in |
+| `chat_messages` (top-level 1-to-1 DMs) | sender / admin | signed-in |
+| `payment` | signed-in create; admin update/delete | signed-in |
+| `users` + `/fcm_tokens` | owner / admin | signed-in |
+| `event_category`, `country_code` | admin | public |
+| `bookmark` | owner | owner |
+| `gallery` | signed-in create; admin edit | public |
+| `bank_account`, `payout` | signed-in create; admin edit | signed-in |
+| `reports_event` | signed-in create; admin only after | admin |
+| `metrics_event` | anyone create (telemetry) | admin |
+| `total/**` | admin | signed-in |
+| `ff_user_push_notifications` | sender only (verified) | admin |
+| `admin` (FF legacy) | signed-in create; admin edit | public |
+| `_admin/**` | admin | admin |
+| `_admin_audit` | admin create; append-only | admin |
+
+---
+
+## Ops runbook
+
+### Admin login
+- URL: `https://event-app-880a3.web.app` (hosted) or your dev port.
+- Account: `admin@eventapp.com` + the fixed password stored in your team password manager.
+- The `admin: true` custom claim was set via:
+  ```bash
+  node scripts/set-admin-claim.mjs admin@eventapp.com
+  ```
+- **Rotate the password** at least every 90 days through the Firebase Auth console. Never commit the password to git.
+
+### Audit log (`_admin_audit`)
+
+Every destructive admin action (event delete, publish/unpublish, event update, user update) is written to `_admin_audit/{auto-id}` with:
+
+```typescript
+{
+  type: 'event.delete' | 'event.publish' | 'event.unpublish' | 'event.update' | 'user.update' | ...,
+  actor:  { uid, email, name },
+  target: { kind: 'event' | 'user', id, name },
+  metadata: { changedFields?: string[] },
+  createdAt: Timestamp,
+  expiresAt: Timestamp,       // createdAt + 90 days
+}
+```
+
+**Retention: 90 days.** A Firestore TTL policy is configured on the `expiresAt` field — Firestore will scan and delete any doc whose `expiresAt < now()` once per day. TTL deletes bypass security rules so the `allow delete: if false` on the collection still holds.
+
+To **verify the TTL policy** is active:
+```bash
+TOKEN=$(node -e "console.log(require(require('os').homedir()+'/.config/configstore/firebase-tools.json').tokens.access_token)")
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://firestore.googleapis.com/v1/projects/event-app-880a3/databases/(default)/collectionGroups/_admin_audit/fields/expiresAt"
+```
+Expected `ttlConfig.state`: `ACTIVE`.
+
+To **(re)create the TTL policy** (e.g., after restoring from backup):
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "https://firestore.googleapis.com/v1/projects/event-app-880a3/databases/(default)/collectionGroups/_admin_audit/fields/expiresAt?updateMask=ttlConfig" \
+  -d '{"ttlConfig":{}}'
+```
+
+To **view recent audit entries** from the Firebase console: Firestore → `_admin_audit` → sort by `createdAt` desc. A dedicated in-app viewer page is a good next step if forensic needs grow.
 
 ---
 
@@ -196,14 +267,62 @@ Granting admin access in **production** should be a deliberate, audited step (Ad
 | `POST … signInWithPassword … 400` | Wrong credentials; user missing password hash; Auth user deleted. |
 | Empty data after login | User lacks `admin: true` claim; rules block reads; sign out/in to refresh token. |
 | Firestore “index required” in console | Deploy **`firestore.indexes.json`** or create the suggested index from the error link; wait until index status is **Enabled**. |
-| Stale analytics on Dashboard | `_admin` cache TTL; some pages call **refresh** explicitly—see `refreshAnalyticsCache` in **`lib/firestore.ts`**. |
+| Stale analytics on Dashboard | `_admin` cache TTL; some pages call **refresh** explicitly—see `refreshAnalyticsCache` in **`lib/firestore/adminCache.ts`**. |
+
+---
+
+## Page State Hooks Pattern
+
+Large pages (Events, Payments, Analytics) extract their state management and data fetching logic into custom hooks (`useEventsPage`, `usePaymentsPage`, `useAnalyticsCharts`) to keep the UI layer thin and maintainable.
+
+### Why?
+- **Readability:** Pages become focused on rendering, not state logic.
+- **Testability:** Hooks can be unit-tested independently without mounting React components.
+- **Reusability:** Similar patterns (browse + search + filters) can be reused across pages.
+
+### Example: `useEventsPage`
+
+```typescript
+// src/hooks/useEventsPage.ts
+export function useEventsPage() {
+  const [items, setItems] = useState<Event[]>([]);
+  const [page, setPage] = useState(1);
+  // ... all state, effects, callbacks
+  return {
+    items, page, hasMore, loadPage,
+    status, setStatus, mode, setMode, search, setSearch,
+    searchMode, searchResults, triggerSearch, exitSearchMode,
+    selected, setSelected, fetchEventCounts,
+    catMap, displayItems,
+    togglePublish, handleDelete,
+  };
+}
+
+// src/pages/Events.tsx
+export default function Events() {
+  const { items, page, /* ... */ } = useEventsPage();
+  // Render tables, modals, filters using hook state
+}
+```
+
+### Adding a New Page Hook
+
+1. Identify state variables, effects, and callbacks in your page.
+2. Create `src/hooks/use[PageName].ts` with:
+   - All `useState` declarations
+   - All `useEffect` + `useCallback` logic
+   - A return interface with all public methods and computed values
+3. Import and use the hook in your page; page becomes ~10 KB → ~5 KB.
+4. Add unit tests in `src/hooks/use[PageName].test.ts`.
 
 ---
 
 ## Code style for contributors
 
 - **TypeScript** strict build (`tsc -b` runs in **`npm run build`**).
+- **Unit tests:** `npm test` (Vitest) — pure helpers in `lib/` and `lib/firestore/*.test.ts`.
 - Prefer **existing hooks** and **table/layout components** for consistency.
+- **New page state:** extract into a custom hook (see **Page State Hooks Pattern** above).
 - New Firestore queries: add **indexes** if Firestore asks for composite indexes; update **`firestore.indexes.json`** and deploy.
 
 For questions about **product scope** or **Firestore field meanings**, refer to your team’s schema documentation or the Flutter app models—this README describes only how **this** admin UI is structured and run.

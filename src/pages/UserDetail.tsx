@@ -2,21 +2,21 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Calendar, CreditCard, Tag, CheckCircle, XCircle,
-  Mail, Shield, Clock, ExternalLink,
+  Mail, Shield, Clock, ExternalLink, Megaphone,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Badge from '../components/Badge';
 import {
   fetchUserById, fetchAttendedEventsByUser, fetchPaymentsByUser,
-  fetchCategoryMap, fetchEventNames,
+  fetchCategoryMap, fetchEventNames, fetchEventsByOrganiser,
 } from '../lib/firestore';
-import type { AppUser, Payment } from '../types';
+import type { AppUser, Event, Payment } from '../types';
 import type { AttendedEventRow } from '../lib/firestore';
 
 const GREEN = '#3d7a5a';
 const LIGHT_GREEN = '#e8f5ee';
 
-type Tab = 'overview' | 'events' | 'payments';
+type Tab = 'overview' | 'organised' | 'events' | 'payments';
 
 export default function UserDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +30,7 @@ export default function UserDetail() {
   const [events, setEvents] = useState<AttendedEventRow[] | null>(null);
   const [eventNames, setEventNames] = useState<Record<string, string>>({});
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  const [organised, setOrganised] = useState<Event[] | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -40,12 +41,14 @@ export default function UserDetail() {
       fetchCategoryMap(),
       fetchAttendedEventsByUser(id),
       fetchPaymentsByUser(id),
-    ]).then(([u, cats, evRows, pays]) => {
+      fetchEventsByOrganiser(id),
+    ]).then(([u, cats, evRows, pays, org]) => {
       setUser(u as AppUser | null);
       setCatMap(cats as Record<string, string>);
       const rows = evRows as AttendedEventRow[];
       setEvents(rows);
       setPayments(pays as Payment[]);
+      setOrganised(org as Event[]);
       if (rows.length > 0) {
         fetchEventNames(rows.map((r) => r.eventId)).then(setEventNames);
       }
@@ -63,6 +66,8 @@ export default function UserDetail() {
   const attended = events?.filter((e) => !e.isCancelled) ?? [];
   const cancelled = events?.filter((e) => e.isCancelled) ?? [];
   const totalPaid = payments?.filter((p) => p.status === 'completed').reduce((s, p) => s + (p.amount ?? 0), 0) ?? 0;
+  const organisedPublished = organised?.filter((e) => e.is_published).length ?? 0;
+  const organisedDraft = (organised?.length ?? 0) - organisedPublished;
 
   const interests = (user as (AppUser & { interest?: unknown[] }) | null)?.interest as string[] | undefined;
 
@@ -135,6 +140,12 @@ export default function UserDetail() {
       {/* ── Stats row ─────────────────────────────────────────── */}
       <div style={styles.statsRow}>
         <StatCard
+          label="Events Organised"
+          value={organised === null ? '…' : organised.length}
+          color="#ede9fe"
+          textColor="#6d28d9"
+        />
+        <StatCard
           label="Events Attended"
           value={events === null ? '…' : attended.length}
           color={LIGHT_GREEN}
@@ -163,7 +174,7 @@ export default function UserDetail() {
       {/* ── Tabs ──────────────────────────────────────────────── */}
       <div style={styles.card}>
         <div style={styles.tabBar}>
-          {(['overview', 'events', 'payments'] as Tab[]).map((t) => (
+          {(['overview', 'organised', 'events', 'payments'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)} style={{
               ...styles.tabBtn,
               color: tab === t ? GREEN : '#6b7280',
@@ -171,6 +182,9 @@ export default function UserDetail() {
               fontWeight: tab === t ? 700 : 400,
             }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
+              {t === 'organised' && organised !== null && (
+                <span style={styles.tabBadge}>{organised.length}</span>
+              )}
               {t === 'events' && events !== null && (
                 <span style={styles.tabBadge}>{events.length}</span>
               )}
@@ -209,6 +223,63 @@ export default function UserDetail() {
                   })}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Organised (events where the user is the author) ── */}
+        {tab === 'organised' && (
+          <div style={styles.tabContent}>
+            {organised === null ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[...Array(3)].map((_, i) => <div key={i} style={styles.skeletonRow} />)}
+              </div>
+            ) : organised.length === 0 ? (
+              <div style={styles.emptyState}>
+                <Megaphone size={32} color="#d1d5db" />
+                <p style={{ marginTop: 8, color: '#9ca3af', fontSize: 14 }}>
+                  This user hasn't organised any events.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: '8px 12px', background: '#f9fafb', borderRadius: 8, marginBottom: 12, fontSize: 13, color: '#6b7280' }}>
+                  <strong style={{ color: '#111827' }}>{organisedPublished}</strong> published ·
+                  {' '}<strong style={{ color: '#111827' }}>{organisedDraft}</strong> draft
+                </div>
+                <div style={styles.tableHeader}>
+                  <span style={{ flex: 3 }}>Event</span>
+                  <span style={{ flex: 1 }}>Status</span>
+                  <span style={{ flex: 1.2 }}>Created</span>
+                  <span style={{ width: 32 }} />
+                </div>
+                {organised.map((ev) => (
+                  <div key={ev.id} style={styles.tableRow}>
+                    <div style={{ flex: 3, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <Megaphone size={14} color="#6d28d9" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ev.name ?? 'Untitled event'}
+                      </span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {ev.is_published
+                        ? <span style={styles.activeChip}><CheckCircle size={11} /> Published</span>
+                        : <span style={styles.draftChip}>Draft</span>
+                      }
+                    </div>
+                    <span style={{ flex: 1.2, fontSize: 12, color: '#9ca3af' }}>
+                      {fmt(ev.create_at)}
+                    </span>
+                    <button
+                      title="View event details"
+                      onClick={() => navigate(`/events/${ev.id}`)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', borderRadius: 4, display: 'flex', alignItems: 'center', width: 32 }}
+                    >
+                      <ExternalLink size={13} color="#6366f1" />
+                    </button>
+                  </div>
+                ))}
+              </>
             )}
           </div>
         )}
@@ -394,6 +465,11 @@ const styles: Record<string, React.CSSProperties> = {
   cancelChip: {
     display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11,
     fontWeight: 600, background: '#fee2e2', color: '#dc2626',
+    padding: '3px 8px', borderRadius: 20,
+  },
+  draftChip: {
+    display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11,
+    fontWeight: 600, background: '#f3f4f6', color: '#6b7280',
     padding: '3px 8px', borderRadius: 20,
   },
   interestChip: {

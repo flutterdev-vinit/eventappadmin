@@ -5,15 +5,10 @@ import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import PageHeader from '../components/PageHeader';
 import { fetchEventsActivity, fetchTotalMessageCount, PAGE_SIZE } from '../lib/firestore';
 import type { EventActivity } from '../lib/firestore';
-import { format } from 'date-fns';
+import { formatDayMonthYear } from '../lib/dateUtils';
 
 const GREEN = '#3d7a5a';
 const LIGHT_GREEN = '#e8f5ee';
-
-function fmt(ts: unknown): string {
-  if (!ts) return '—';
-  try { return format((ts as { toDate(): Date }).toDate(), 'dd MMM yyyy'); } catch { return '—'; }
-}
 
 export default function Messages() {
   const navigate = useNavigate();
@@ -297,7 +292,7 @@ export default function Messages() {
                   </div>
 
                   {/* Start date */}
-                  <span style={{ flex: 1, fontSize: 12, color: '#9ca3af' }}>{fmt(row.startDate)}</span>
+                  <span style={{ flex: 1, fontSize: 12, color: '#9ca3af' }}>{formatDayMonthYear(row.startDate)}</span>
 
                   {/* Link */}
                   <button

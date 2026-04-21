@@ -1,185 +1,33 @@
-import { useEffect, useState, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
   AreaChart, Area,
 } from 'recharts';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
-import { format, subMonths } from 'date-fns';
 import PageHeader from '../components/PageHeader';
-import { fetchAnalyticsCache, refreshAnalyticsCache, fetchCategoryMap, fetchUserNames } from '../lib/firestore';
-import type { Event, Payment } from '../types';
+import EntityLink from '../components/EntityLink';
 import { useWindowSize } from '../hooks/useWindowSize';
+import { useAnalyticsCharts } from '../hooks/useAnalyticsCharts';
 
 const COLORS = ['#3d7a5a', '#2563eb', '#d97706', '#7c3aed', '#16a34a', '#dc2626', '#0891b2'];
 
-function toDate(ts: unknown): Date | null {
-  if (!ts) return null;
-  try { return (ts as { toDate(): Date }).toDate(); } catch { return null; }
-}
-
-function monthKey(d: Date) { return format(d, 'yyyy-MM'); }
-function monthLabel(d: Date) { return format(d, 'MMM yy'); }
-
 export default function Analytics() {
   const { isMobile } = useWindowSize();
-  const [events, setEvents] = useState<Event[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [cached, setCached] = useState(false);
-  const [catMap, setCatMap] = useState<Record<string, string>>({});
-  const [organiserNames, setOrganiserNames] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        const [map, hit] = await Promise.all([
-          fetchCategoryMap(),
-          fetchAnalyticsCache(),
-        ]);
-        setCatMap(map);
-        const fresh = hit ?? await refreshAnalyticsCache();
-        const evs = fresh.events;
-        const pays = fresh.payments;
-        setEvents(evs);
-        setPayments(pays);
-        setCached(!!hit);
-
-        // Resolve organiser UIDs to names (top 10)
-        const uids = [...new Set(
-          evs.map((ev) => String(ev.author ?? '').split('/').pop() ?? '').filter(Boolean)
-        )].slice(0, 20);
-        if (uids.length) fetchUserNames(uids).then(setOrganiserNames);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  // ─── Category breakdown ──────────────────────────────────────────────────
-  const categoryData = useMemo(() => {
-    const count: Record<string, number> = {};
-    events.forEach((ev) => {
-      // Resolve category path/ID to human-readable name
-      const raw = ev.category ?? '';
-      const name = catMap[raw] ?? catMap[raw.split('/').pop() ?? ''] ?? (raw.split('/').pop() || 'Uncategorised');
-      count[name] = (count[name] ?? 0) + 1;
-    });
-    return Object.entries(count)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-  }, [events, catMap]);
-
-  // ─── Mode breakdown ──────────────────────────────────────────────────────
-  const modeData = useMemo(() => {
-    const map: Record<string, number> = {};
-    events.forEach((ev) => {
-      // Normalise to lowercase to merge "Offline" and "offline" etc.
-      const m = (ev.mode ?? 'in-person').toLowerCase().trim();
-      map[m] = (map[m] ?? 0) + 1;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [events]);
-
-  // ─── Published vs Draft ──────────────────────────────────────────────────
-  const publishData = useMemo(() => [
-    { name: 'Published', value: events.filter((e) => e.is_published).length },
-    { name: 'Draft', value: events.filter((e) => !e.is_published).length },
-  ], [events]);
-
-  // ─── Paid vs Free ────────────────────────────────────────────────────────
-  const paidData = useMemo(() => [
-    { name: 'Paid', value: events.filter((e) => e.is_paid).length },
-    { name: 'Free', value: events.filter((e) => !e.is_paid).length },
-  ], [events]);
-
-  // ─── Events created per month (last 12) ──────────────────────────────────
-  const eventsOverTime = useMemo(() => {
-    const now = new Date();
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const d = subMonths(now, 11 - i);
-      return { key: monthKey(d), label: monthLabel(d), count: 0 };
-    });
-    events.forEach((ev) => {
-      const d = toDate(ev.create_at);
-      if (!d) return;
-      const b = months.find((m) => m.key === monthKey(d));
-      if (b) b.count++;
-    });
-    return months.map(({ label, count }) => ({ month: label, count }));
-  }, [events]);
-
-  // ─── Revenue per month ───────────────────────────────────────────────────
-  const revenueOverTime = useMemo(() => {
-    const now = new Date();
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const d = subMonths(now, 11 - i);
-      return { key: monthKey(d), label: monthLabel(d), revenue: 0 };
-    });
-    payments.forEach((p) => {
-      if (p.status !== 'completed') return;
-      const d = toDate(p.date);
-      if (!d) return;
-      const b = months.find((m) => m.key === monthKey(d));
-      if (b) b.revenue += p.amount ?? 0;
-    });
-    return months.map(({ label, revenue }) => ({ month: label, revenue: Math.round(revenue) }));
-  }, [payments]);
-
-  // ─── Top event categories by revenue ────────────────────────────────────
-  const revByCategory = useMemo(() => {
-    // Map event ID → resolved category name
-    const eventCatMap: Record<string, string> = {};
-    events.forEach((ev) => {
-      const raw = ev.category ?? '';
-      const name = catMap[raw] ?? catMap[raw.split('/').pop() ?? ''] ?? (raw.split('/').pop() || 'Uncategorised');
-      eventCatMap[ev.id] = name;
-    });
-    const catRev: Record<string, number> = {};
-    payments.forEach((p) => {
-      if (p.status !== 'completed') return;
-      const evId = p.eventId ? String(p.eventId).split('/').pop() ?? '' : '';
-      const cat = eventCatMap[evId] ?? 'Uncategorised';
-      catRev[cat] = (catRev[cat] ?? 0) + (p.amount ?? 0);
-    });
-    return Object.entries(catRev)
-      .map(([name, revenue]) => ({ name, revenue: Math.round(revenue) }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 8);
-  }, [events, payments, catMap]);
-
-  // ─── Event geo points ─────────────────────────────────────────────────────
-  const geoPoints = useMemo(() =>
-    events
-      .filter((ev) => ev.location?.geopoint)
-      .map((ev) => ({
-        lat: ev.location!.geopoint!.latitude,
-        lng: ev.location!.geopoint!.longitude,
-        name: ev.name ?? 'Event',
-        published: ev.is_published ?? false,
-      })),
-    [events],
-  );
-
-  // ─── Organiser leaderboard ────────────────────────────────────────────────
-  const organiserData = useMemo(() => {
-    const count: Record<string, number> = {};
-    events.forEach((ev) => {
-      if (!ev.author) return;
-      // author is stored as "users/{uid}" path string after sanitisation
-      const uid = String(ev.author).split('/').pop() ?? ev.author;
-      count[uid] = (count[uid] ?? 0) + 1;
-    });
-    return Object.entries(count)
-      .map(([uid, total]) => ({ uid, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10);
-  }, [events]);
+  
+  const {
+    loading,
+    cached,
+    organiserNames,
+    categoryData,
+    modeData,
+    publishData,
+    paidData,
+    eventsOverTime,
+    revenueOverTime,
+    revByCategory,
+    geoPoints,
+    organiserData,
+  } = useAnalyticsCharts();
 
   const colHalf = isMobile ? '1fr' : '1fr 1fr';
   const colFull = '1fr';
@@ -328,9 +176,16 @@ export default function Analytics() {
                       </div>
                     </div>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', minWidth: 28, textAlign: 'right' }}>{row.total}</span>
-                    <span style={{ fontSize: 12, color: '#374151', fontWeight: 500, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {organiserNames[row.uid] ?? '…'}
-                    </span>
+                    <div style={{ fontSize: 12, fontWeight: 500, maxWidth: 110 }}>
+                      <EntityLink
+                        kind="user"
+                        id={row.uid}
+                        label={organiserNames[row.uid] ?? '…'}
+                        ellipsis
+                        strong
+                        style={{ fontSize: 12 }}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -365,7 +220,8 @@ export default function Analytics() {
                         }}
                       >
                         <Popup>
-                          <strong>{pt.name}</strong><br />
+                          <EntityLink kind="event" id={pt.id} label={pt.name} strong />
+                          <br />
                           {pt.published ? '✅ Published' : '📝 Draft'}
                         </Popup>
                       </CircleMarker>

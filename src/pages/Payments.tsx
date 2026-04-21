@@ -1,154 +1,39 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
 import { DollarSign, CheckCircle, Clock, XCircle } from 'lucide-react';
-import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { format, subMonths } from 'date-fns';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import Badge from '../components/Badge';
 import DataTable from '../components/Table';
-import {
-  fetchPaymentsPage,
-  fetchPaymentCount,
-  fetchPaymentRevenue,
-  fetchPaymentStatusCounts,
-  fetchAnalyticsCache,
-  refreshAnalyticsCache,
-  fetchEventNames,
-  fetchUserNames,
-  PAGE_SIZE,
-} from '../lib/firestore';
-import type { Payment } from '../types';
-
-interface EnrichedPayment extends Payment {
-  eventName?: string;
-  userName?: string;
-}
+import EntityLink from '../components/EntityLink';
+import { PAGE_SIZE } from '../lib/firestore';
+import { formatDayMonthYear } from '../lib/dateUtils';
 import { useWindowSize } from '../hooks/useWindowSize';
+import { usePaymentsPage } from '../hooks/usePaymentsPage';
+import type { EnrichedPayment, StatusFilter } from '../hooks/usePaymentsPage';
 
 const BAR_COLORS = ['#3d7a5a', '#93c9a8', '#5a9d7a', '#7ab5a0', '#4a8c6a', '#2d6a4f'];
-
-type StatusFilter = 'all' | 'completed' | 'pending' | 'failed' | 'refunded';
-
-function toDate(ts: unknown): Date | null {
-  if (!ts) return null;
-  try { return (ts as { toDate(): Date }).toDate(); } catch { return null; }
-}
-
-/** Group payments by calendar month, return last 6 months. */
-function buildMonthlyRevenue(payments: Payment[]): { month: string; revenue: number }[] {
-  const now = new Date();
-  const months = Array.from({ length: 6 }, (_, i) => {
-    const d = subMonths(now, 5 - i);
-    return { key: format(d, 'yyyy-MM'), label: format(d, 'MMM'), revenue: 0 };
-  });
-  payments.forEach((p) => {
-    if (p.status !== 'completed') return;
-    const d = toDate(p.date);
-    if (!d) return;
-    const key = format(d, 'yyyy-MM');
-    const bucket = months.find((m) => m.key === key);
-    if (bucket) bucket.revenue += p.amount ?? 0;
-  });
-  return months.map(({ label, revenue }) => ({ month: label, revenue: Math.round(revenue * 100) / 100 }));
-}
 
 export default function Payments() {
   const { isMobile, isTablet } = useWindowSize();
 
-  // ── Chart + stats state ───────────────────────────────────────────────────
-  const [monthlyRevenue, setMonthlyRevenue] = useState<{ month: string; revenue: number }[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [completedCount, setCompletedCount] = useState(0);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [failedCount, setFailedCount] = useState(0);
-  const [statsLoading, setStatsLoading] = useState(true);
-
-  // ── Table pagination state ────────────────────────────────────────────────
-  const [tableItems, setTableItems] = useState<EnrichedPayment[]>([]);
-  const [tableLoading, setTableLoading] = useState(true);
-  const [tablePage, setTablePage] = useState(1);
-  const [tableHasMore, setTableHasMore] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const cursors = useRef<(QueryDocumentSnapshot | null)[]>([null]);
-
-  // Load chart stats once — no doc reads, only aggregations + cache
-  useEffect(() => {
-    async function load() {
-      setStatsLoading(true);
-      try {
-        const [statusCounts, count, revenue, analyticsData] = await Promise.all([
-          fetchPaymentStatusCounts(),
-          fetchPaymentCount(),
-          fetchPaymentRevenue(),
-          fetchAnalyticsCache().then((hit) => hit ?? refreshAnalyticsCache()),
-        ]);
-        setCompletedCount(statusCounts.completed);
-        setPendingCount(statusCounts.pending);
-        setFailedCount(statusCounts.failed + statusCounts.refunded);
-        setTotalCount(count);
-        setTotalRevenue(revenue);
-        setMonthlyRevenue(buildMonthlyRevenue(analyticsData.payments));
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setStatsLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  // Load paginated table + resolve event/user names
-  const loadTablePage = useCallback(async (pageNum: number, filter: StatusFilter) => {
-    setTableLoading(true);
-    try {
-      const cursor = cursors.current[pageNum - 1] ?? null;
-      const result = await fetchPaymentsPage(filter, cursor);
-      setTableItems(result.items);  // show rows immediately, names loading
-      setTableHasMore(result.hasMore);
-      setTablePage(pageNum);
-      if (result.cursor && result.hasMore) cursors.current[pageNum] = result.cursor;
-
-      // Batch-resolve event and user names in parallel
-      const rawEventIds = result.items
-        .map((p) => String(p.eventId ?? '').split('/').pop() ?? '')
-        .filter(Boolean);
-      const rawUserIds = result.items
-        .map((p) => String(p.userId ?? '').split('/').pop() ?? '')
-        .filter(Boolean);
-
-      const [eventNames, userNames] = await Promise.all([
-        fetchEventNames([...new Set(rawEventIds)]),
-        fetchUserNames([...new Set(rawUserIds)]),
-      ]);
-
-      setTableItems(result.items.map((p) => {
-        const eid = String(p.eventId ?? '').split('/').pop() ?? '';
-        const uid = String(p.userId ?? '').split('/').pop() ?? '';
-        return {
-          ...p,
-          eventName: eid ? (eventNames[eid] ?? undefined) : undefined,
-          userName: uid ? (userNames[uid] ?? undefined) : undefined,
-        };
-      }));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setTableLoading(false);
-    }
-  }, []);
-
-  // Reset table page when filter changes
-  useEffect(() => {
-    cursors.current = [null];
-    setTablePage(1);
-    loadTablePage(1, statusFilter);
-  }, [statusFilter, loadTablePage]);
-
-  const loading = statsLoading;
+  const {
+    monthlyRevenue,
+    totalCount,
+    totalRevenue,
+    completedCount,
+    pendingCount,
+    failedCount,
+    statsLoading,
+    tableItems,
+    tableLoading,
+    tablePage,
+    tableHasMore,
+    loadTablePage,
+    statusFilter,
+    setStatusFilter,
+  } = usePaymentsPage();
 
   const statsGridCols = isMobile ? 'repeat(2, 1fr)' : isTablet ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)';
   const chartsGridCols = isMobile ? '1fr' : '3fr 2fr';
@@ -156,36 +41,31 @@ export default function Payments() {
   const statCards = [
     {
       label: 'Total Revenue',
-      value: loading ? '—' : `$${totalRevenue.toLocaleString()}`,
+      value: statsLoading ? '—' : `$${totalRevenue.toLocaleString()}`,
       sub: 'completed payments',
       icon: <DollarSign size={22} color="#3d7a5a" />,
       iconBg: '#e8f5ee',
     },
     {
       label: 'Total Transactions',
-      value: loading ? '—' : totalCount.toLocaleString(),
+      value: statsLoading ? '—' : totalCount.toLocaleString(),
       icon: <CheckCircle size={22} color="#2563eb" />,
       iconBg: '#dbeafe',
     },
     {
       label: 'Completed',
-      value: loading ? '—' : completedCount.toLocaleString(),
+      value: statsLoading ? '—' : completedCount.toLocaleString(),
       sub: totalCount ? `${Math.round((completedCount / totalCount) * 100)}% success rate` : '',
       icon: <CheckCircle size={22} color="#16a34a" />,
       iconBg: '#dcfce7',
     },
     {
       label: 'Pending / Failed',
-      value: loading ? '—' : `${pendingCount} / ${failedCount}`,
+      value: statsLoading ? '—' : `${pendingCount} / ${failedCount}`,
       icon: <Clock size={22} color="#d97706" />,
       iconBg: '#fef3c7',
     },
   ];
-
-  const fmt = (ts: unknown): string => {
-    const d = toDate(ts);
-    return d ? format(d, 'dd MMM yyyy') : '—';
-  };
 
   const columns = [
     {
@@ -193,9 +73,13 @@ export default function Payments() {
       header: 'Event',
       render: (p: EnrichedPayment) => (
         <div style={{ minWidth: 120 }}>
-          <p style={{ fontWeight: 500, color: '#111827' }}>
-            {p.eventName ?? (p.eventId ? <span style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</span> : 'Unknown event')}
-          </p>
+          {p.eventName ? (
+            <EntityLink kind="event" id={p.eventId} label={p.eventName} strong ellipsis />
+          ) : p.eventId ? (
+            <span style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</span>
+          ) : (
+            <span style={{ color: '#9ca3af' }}>Unknown event</span>
+          )}
           <p style={{ fontSize: 12, color: '#d1d5db' }}>{p.currency ?? 'Payment'}</p>
         </div>
       ),
@@ -203,15 +87,17 @@ export default function Payments() {
     {
       key: 'userId',
       header: 'User',
-      render: (p: EnrichedPayment) => (
-        <span style={{ fontSize: 13, color: '#374151' }}>
-          {p.userName ?? (p.userId ? <span style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</span> : '—')}
-        </span>
-      ),
+      render: (p: EnrichedPayment) => {
+        if (p.userName) {
+          return <EntityLink kind="user" id={p.userId} label={p.userName} />;
+        }
+        if (p.userId) return <span style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</span>;
+        return <span style={{ color: '#9ca3af' }}>—</span>;
+      },
     },
     { key: 'amount', header: 'Amount', align: 'right' as const, render: (p: EnrichedPayment) => <strong>${(p.amount ?? 0).toFixed(2)}</strong> },
     { key: 'status', header: 'Status', render: (p: EnrichedPayment) => <Badge status={p.status ?? 'pending'} /> },
-    { key: 'date', header: 'Date', render: (p: EnrichedPayment) => fmt(p.date) },
+    { key: 'date', header: 'Date', render: (p: EnrichedPayment) => formatDayMonthYear(p.date) },
   ];
 
   return (
@@ -297,8 +183,8 @@ export default function Payments() {
             page: tablePage,
             hasMore: tableHasMore,
             loading: tableLoading,
-            onPrev: () => { if (tablePage > 1) loadTablePage(tablePage - 1, statusFilter); },
-            onNext: () => loadTablePage(tablePage + 1, statusFilter),
+            onPrev: () => { if (tablePage > 1) loadTablePage(tablePage - 1); },
+            onNext: () => loadTablePage(tablePage + 1),
             pageSize: PAGE_SIZE,
             itemCount: tableItems.length,
           }}

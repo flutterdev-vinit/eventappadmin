@@ -1,21 +1,15 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, RotateCcw, Eye, Trash2, ToggleLeft, ToggleRight, X, ExternalLink } from 'lucide-react';
-import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import PageHeader from '../components/PageHeader';
 import Badge from '../components/Badge';
 import DataTable from '../components/Table';
-import {
-  fetchEventsPage, updateEvent, deleteEvent,
-  fetchAttendeeCountForEvent, fetchCompletedPaymentCountForEvent,
-  searchEvents, fetchCategoryMap, PAGE_SIZE,
-} from '../lib/firestore';
+import EntityLink from '../components/EntityLink';
+import { PAGE_SIZE } from '../lib/firestore';
 import type { Event } from '../types';
-import { format } from 'date-fns';
+import { formatDayMonthYear } from '../lib/dateUtils';
 import { useWindowSize } from '../hooks/useWindowSize';
-import { useDebounce } from '../hooks/useDebounce';
-
-type StatusFilter = 'all' | 'published' | 'draft';
+import { useEventsPage, type StatusFilter } from '../hooks/useEventsPage';
 
 // Fixed list of event modes — not derived from current page so mode filter
 // works even when a mode doesn't appear on the first page of results.
@@ -24,135 +18,37 @@ const EVENT_MODES = ['in-person', 'online', 'hybrid'];
 export default function Events() {
   const { isMobile } = useWindowSize();
   const navigate = useNavigate();
-
-  // ── Browse mode state ────────────────────────────────────────────────────
-  const [items, setItems] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-
-  // ── Server-side filters (each change resets pagination) ──────────────────
-  const [status, setStatus] = useState<StatusFilter>('all');
-  const [mode, setMode] = useState('');               // server-side via where('mode',...)
-  const debouncedMode = useDebounce(mode, 400);       // debounced so rapid changes don't spam Firestore
-
-  // ── Client-side filters (applied to current page — zero extra reads) ─────
-  const [search, setSearch] = useState('');           // instant page-level filter as you type
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
-
-  // ── Search mode (Enter / Search button → cross-page Firestore prefix query) ─
-  const [searchMode, setSearchMode] = useState(false);
-  const [searchResults, setSearchResults] = useState<Event[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Event detail state ───────────────────────────────────────────────────
-  const [selected, setSelected] = useState<Event | null>(null);
-  const [selectedAttendees, setSelectedAttendees] = useState<number | null>(null);
-  const [selectedPaidCount, setSelectedPaidCount] = useState<number | null>(null);
-  const [catMap, setCatMap] = useState<Record<string, string>>({});
-
-  // Cursor stack: index i holds the cursor needed to fetch page i+1
-  const cursors = useRef<(QueryDocumentSnapshot | null)[]>([null]);
-
-  const loadPage = useCallback(async (pageNum: number, sf: StatusFilter, mf: string) => {
-    setLoading(true);
-    try {
-      const cursor = cursors.current[pageNum - 1] ?? null;
-      const result = await fetchEventsPage(sf, cursor, mf);
-      setItems(result.items);
-      setHasMore(result.hasMore);
-      setPage(pageNum);
-      if (result.cursor && result.hasMore) {
-        cursors.current[pageNum] = result.cursor;
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Load category map once
-  useEffect(() => { fetchCategoryMap().then(setCatMap); }, []);
-
-  // Reload page 1 whenever status changes
-  useEffect(() => {
-    if (searchMode) return; // don't interfere with search results
-    cursors.current = [null];
-    setPage(1);
-    setSearch('');
-    loadPage(1, status, debouncedMode);
-  }, [status, loadPage]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reload page 1 whenever debounced mode changes (server-side filter)
-  useEffect(() => {
-    if (searchMode) return;
-    cursors.current = [null];
-    setPage(1);
-    loadPage(1, status, debouncedMode);
-  }, [debouncedMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Enter-to-search: fires a cross-page Firestore prefix query ───────────
-  const triggerSearch = useCallback(async () => {
-    const term = search.trim();
-    if (!term) { exitSearchMode(); return; }
-    setSearchLoading(true);
-    setSearchMode(true);
-    try {
-      const results = await searchEvents(term, status);
-      setSearchResults(results);
-    } catch (e) {
-      console.error(e);
-      setSearchResults([]);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [search, status]);
-
-  const exitSearchMode = useCallback(() => {
-    setSearchMode(false);
-    setSearchResults([]);
-    setSearch('');
-    cursors.current = [null];
-    loadPage(1, status, debouncedMode);
-  }, [status, debouncedMode, loadPage]);
-
-  // ── Client-side filter on current page (price range only in browse; plus text filter) ─
-  const browseFiltered = useMemo(() => items.filter((ev) => {
-    const q = search.toLowerCase();
-    if (q && !ev.name?.toLowerCase().includes(q) && !ev.description?.toLowerCase().includes(q)) return false;
-    if (minPrice && (ev.price ?? 0) < Number(minPrice)) return false;
-    if (maxPrice && (ev.price ?? 0) > Number(maxPrice)) return false;
-    return true;
-  }), [items, search, minPrice, maxPrice]);
-
-  // In search mode, apply price filter client-side to the server results
-  const searchFiltered = useMemo(() => searchResults.filter((ev) => {
-    if (minPrice && (ev.price ?? 0) < Number(minPrice)) return false;
-    if (maxPrice && (ev.price ?? 0) > Number(maxPrice)) return false;
-    return true;
-  }), [searchResults, minPrice, maxPrice]);
-
-  const displayItems = searchMode ? searchFiltered : browseFiltered;
-
-  const fmt = (ts: unknown): string => {
-    if (!ts) return '—';
-    try { return format((ts as { toDate(): Date }).toDate(), 'dd MMM yyyy'); } catch { return '—'; }
-  };
-
-  const togglePublish = async (ev: Event) => {
-    await updateEvent(ev.id, { is_published: !ev.is_published });
-    if (!searchMode) { cursors.current = [null]; loadPage(1, status, debouncedMode); }
-  };
-
-  const handleDelete = async (ev: Event) => {
-    if (!confirm(`Delete "${ev.name}"?`)) return;
-    await deleteEvent(ev.id);
-    if (!searchMode) { cursors.current = [null]; loadPage(1, status, debouncedMode); }
-    else setSearchResults((prev) => prev.filter((e) => e.id !== ev.id));
-  };
+  const {
+    loading,
+    page,
+    hasMore,
+    loadPage,
+    status,
+    setStatus,
+    mode,
+    setMode,
+    search,
+    setSearch,
+    minPrice,
+    setMinPrice,
+    maxPrice,
+    setMaxPrice,
+    searchMode,
+    searchLoading,
+    triggerSearch,
+    exitSearchMode,
+    selected,
+    openSelected,
+    closeSelected,
+    selectedAttendees,
+    selectedPaidCount,
+    catMap,
+    displayItems,
+    togglePublish,
+    handleDelete,
+  } = useEventsPage();
 
   const resetFilters = () => {
     setSearch('');
@@ -162,8 +58,8 @@ export default function Events() {
     if (searchMode) exitSearchMode();
   };
 
-  const goNext = () => loadPage(page + 1, status, debouncedMode);
-  const goPrev = () => { if (page > 1) loadPage(page - 1, status, debouncedMode); };
+  const goNext = () => loadPage(page + 1);
+  const goPrev = () => { if (page > 1) loadPage(page - 1); };
 
   const columns = [
     {
@@ -171,7 +67,7 @@ export default function Events() {
       header: 'Event',
       render: (ev: Event) => (
         <div style={{ minWidth: 160 }}>
-          <p style={{ fontWeight: 500, color: '#111827' }}>{ev.name ?? '—'}</p>
+          <EntityLink kind="event" id={ev.id} label={ev.name ?? '—'} strong />
           <p style={{ fontSize: 12, color: '#9ca3af' }}>
             {ev.category
               ? (catMap[ev.category] ?? catMap[ev.category.split('/').pop() ?? ''] ?? 'Unknown category')
@@ -183,12 +79,12 @@ export default function Events() {
     {
       key: 'startDate',
       header: 'Start Date',
-      render: (ev: Event) => fmt(ev.startDate),
+      render: (ev: Event) => formatDayMonthYear(ev.startDate),
     },
     {
       key: 'endDate',
       header: 'End Date',
-      render: (ev: Event) => fmt(ev.endDate),
+      render: (ev: Event) => formatDayMonthYear(ev.endDate),
     },
     {
       key: 'mode',
@@ -217,13 +113,7 @@ export default function Events() {
       align: 'right' as const,
       render: (ev: Event) => (
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-          <ActionBtn title="Quick view" onClick={() => {
-            setSelected(ev);
-            setSelectedAttendees(null);
-            setSelectedPaidCount(null);
-            fetchAttendeeCountForEvent(ev.id).then(setSelectedAttendees);
-            fetchCompletedPaymentCountForEvent(ev.id).then(setSelectedPaidCount);
-          }} icon={<Eye size={14} />} />
+          <ActionBtn title="Quick view" onClick={() => openSelected(ev)} icon={<Eye size={14} />} />
           <ActionBtn title="Full details" onClick={() => navigate(`/events/${ev.id}`)} icon={<ExternalLink size={14} color="#6366f1" />} />
           <ActionBtn
             title={ev.is_published ? 'Unpublish' : 'Publish'}
@@ -303,7 +193,7 @@ export default function Events() {
           <select
             style={{ ...styles.select, borderColor: mode ? '#3d7a5a' : '#e5e7eb' }}
             value={mode}
-            onChange={(e) => { setMode(e.target.value); setPage(1); }}
+            onChange={(e) => setMode(e.target.value)}
             title="Server-side filter — searches across all pages"
           >
             <option value="">All Modes</option>
@@ -357,7 +247,7 @@ export default function Events() {
       </div>
 
       {selected && (
-        <Modal title={selected.name ?? 'Event'} onClose={() => { setSelected(null); setSelectedAttendees(null); setSelectedPaidCount(null); }}>
+        <Modal title={selected.name ?? 'Event'} onClose={closeSelected}>
           {/* Funnel: Invited → Attended → Paid */}
           {(() => {
             const invited = selected.invitees?.length ?? 0;
@@ -411,8 +301,8 @@ export default function Events() {
                 : '—'
             } />
             <DL label="Mode" value={<Badge status={selected.mode ?? 'in-person'} />} />
-            <DL label="Start" value={fmt(selected.startDate)} />
-            <DL label="End" value={fmt(selected.endDate)} />
+            <DL label="Start" value={formatDayMonthYear(selected.startDate)} />
+            <DL label="End" value={formatDayMonthYear(selected.endDate)} />
             <DL label="Private" value={selected.is_private ? 'Yes — invite only' : 'Public'} />
             <DL label="Price" value={selected.is_paid ? `$${selected.price}` : 'Free'} />
             {selected.description && <DL label="Description" value={selected.description} />}

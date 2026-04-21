@@ -5,10 +5,10 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { format, subMonths } from 'date-fns';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import Badge from '../components/Badge';
+import EntityLink from '../components/EntityLink';
 import {
   fetchAdminStats,
   refreshAdminStats,
@@ -23,39 +23,9 @@ import {
 } from '../lib/firestore';
 import type { Event, Payment, AppUser } from '../types';
 import { useWindowSize } from '../hooks/useWindowSize';
+import { buildMonthlyEventData, formatDayMonthYear } from '../lib/dateUtils';
 
 const PIE_COLORS = ['#3d7a5a', '#93c9a8'];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function toDate(ts: unknown): Date | null {
-  if (!ts) return null;
-  try { return (ts as { toDate(): Date }).toDate(); } catch { return null; }
-}
-
-function fmt(ts: unknown): string {
-  const d = toDate(ts);
-  return d ? format(d, 'dd MMM yyyy') : '—';
-}
-
-/** Group events by calendar month key "YYYY-MM" and return last 6 months. */
-function buildMonthlyEventData(events: Event[]) {
-  const now = new Date();
-  const months = Array.from({ length: 6 }, (_, i) => {
-    const d = subMonths(now, 5 - i);
-    return { key: format(d, 'yyyy-MM'), label: format(d, 'MMM'), count: 0 };
-  });
-
-  events.forEach((ev) => {
-    const d = toDate(ev.create_at);
-    if (!d) return;
-    const key = format(d, 'yyyy-MM');
-    const bucket = months.find((m) => m.key === key);
-    if (bucket) bucket.count++;
-  });
-
-  return months.map(({ label, count }) => ({ month: label, events: count }));
-}
 
 /** Compute trend % between current month and previous month. */
 function computeTrend(data: { month: string; events: number }[]): { value: string; up: boolean } | undefined {
@@ -245,7 +215,7 @@ export default function Dashboard() {
                   {recentEvents.map((ev) => (
                     <tr key={ev.id}>
                       <td style={styles.miniTd}>
-                        <p style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{ev.name ?? '—'}</p>
+                        <EntityLink kind="event" id={ev.id} label={ev.name ?? '—'} strong />
                         <p style={{ fontSize: 12, color: '#9ca3af' }}>
                           {ev.category
                             ? (catMap[ev.category] ?? catMap[ev.category.split('/').pop() ?? ''] ?? '')
@@ -253,7 +223,7 @@ export default function Dashboard() {
                         </p>
                       </td>
                       <td style={styles.miniTd}><Badge status={ev.mode ?? 'in-person'} /></td>
-                      <td style={styles.miniTd} >{fmt(ev.startDate)}</td>
+                      <td style={styles.miniTd} >{formatDayMonthYear(ev.startDate)}</td>
                       <td style={styles.miniTd}><Badge status={ev.is_published ? 'published' : 'draft'} /></td>
                     </tr>
                   ))}
@@ -281,9 +251,14 @@ export default function Dashboard() {
                   <div key={u.id} style={styles.userRow}>
                     <div style={styles.userAvatar}>{(u.displayName ?? 'U')[0].toUpperCase()}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontWeight: 500, fontSize: 13, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.displayName ?? 'Unknown'}
-                      </p>
+                      <EntityLink
+                        kind="user"
+                        id={u.id}
+                        label={u.displayName ?? 'Unknown'}
+                        strong
+                        ellipsis
+                        style={{ fontSize: 13 }}
+                      />
                       <p style={{ fontSize: 12, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {u.email ?? ''}
                       </p>
@@ -307,16 +282,18 @@ export default function Dashboard() {
               <p style={styles.dimText}>No payments yet.</p>
             ) : (
               <div>
-                {recentPayments.map((p) => (
+                {recentPayments.map((p) => {
+                  const eid = String(p.eventId ?? '').split('/').pop() ?? '';
+                  const name = eid ? (paymentEventNames[eid] ?? 'Loading…') : 'Payment';
+                  return (
                   <div key={p.id} style={styles.payRow}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontWeight: 500, fontSize: 13, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {(() => {
-                          const eid = String(p.eventId ?? '').split('/').pop() ?? '';
-                          return eid ? (paymentEventNames[eid] ?? 'Loading…') : 'Payment';
-                        })()}
-                      </p>
-                      <p style={{ fontSize: 12, color: '#9ca3af' }}>{fmt(p.date)}</p>
+                      {eid ? (
+                        <EntityLink kind="event" id={eid} label={name} strong ellipsis style={{ fontSize: 13 }} />
+                      ) : (
+                        <p style={{ fontWeight: 500, fontSize: 13, color: '#111827' }}>Payment</p>
+                      )}
+                      <p style={{ fontSize: 12, color: '#9ca3af' }}>{formatDayMonthYear(p.date)}</p>
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <p style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>
@@ -325,7 +302,8 @@ export default function Dashboard() {
                       <Badge status={p.status ?? 'pending'} />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

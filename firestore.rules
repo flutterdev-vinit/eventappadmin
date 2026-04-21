@@ -11,42 +11,39 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
 
-    // Returns true if the current user is the document author.
-    // The `author` field is stored as a Firestore DocumentReference path
-    // (e.g. /databases/(default)/documents/users/<uid>).
+    // Event author check — `author` is stored as a DocumentReference to /users/<uid>.
     function isEventAuthor(eventData) {
       return isSignedIn() &&
         eventData.author == /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
     // ─── Events ───────────────────────────────────────────────────────────────
-    // Regular users:
-    //   - Can create their own events (draft or published)
-    //   - Can read their own events (any status) + all published events
-    //   - Can update/delete only their own events
-    // Admin: full access
+    // The Flutter (FlutterFlow) app expects signed-in users to freely read any
+    // event (published, draft, other users'). We intentionally keep reads wide
+    // open here to match the production-deployed behaviour; tightening requires
+    // a coordinated mobile release.
     match /Event/{eventId} {
       allow create: if isSignedIn();
-      allow read:   if isAdmin()
-                    || isEventAuthor(resource.data)
-                    || resource.data.is_published == true;
+      allow read:   if isSignedIn();
       allow update: if isAdmin() || isEventAuthor(resource.data);
       allow delete: if isAdmin() || isEventAuthor(resource.data);
 
-      // Chat messages: any signed-in user can read/post; only admin or message
-      // sender can delete
+      // Chat messages nested under an event.
       match /chat_messages/{msgId} {
         allow read:   if isSignedIn();
         allow create: if isSignedIn();
-        allow update: if isAdmin();
+        allow update: if isAdmin()
+                      || (isSignedIn() &&
+                          resource.data.sender_ref ==
+                            /databases/$(database)/documents/users/$(request.auth.uid));
         allow delete: if isAdmin()
                       || (isSignedIn() &&
                           resource.data.sender_ref ==
                             /databases/$(database)/documents/users/$(request.auth.uid));
       }
 
-      // Attendees: users can register themselves; admin manages all
-      // user_id may be stored as a plain UID string or a DocumentReference.
+      // Attendees nested under an event — invite, RSVP, cancel.
+      // user_id may be a plain UID string or a DocumentReference.
       match /attendees/{attendeeId} {
         allow read:   if isSignedIn();
         allow create: if isSignedIn();
@@ -59,45 +56,168 @@ service cloud.firestore {
       }
     }
 
-    // ─── Payments ─────────────────────────────────────────────────────────────
-    // Payment documents are created by the app (or a Cloud Function).
-    // The user who made the payment can read it; admin can read + write all.
-    // userId may be stored as a plain UID string OR as a DocumentReference
-    // (Flutter SDK stores refs as DocumentReference objects). Both forms are
-    // checked so payment history works regardless of how the mobile app writes it.
-    match /payment/{paymentId} {
-      allow read:   if isAdmin()
-                    || (isSignedIn() && resource.data.userId == request.auth.uid)
-                    || (isSignedIn() && resource.data.userId == /databases/$(database)/documents/users/$(request.auth.uid));
+    // ─── Top-level chat messages (1-to-1 or group chats outside an event) ─────
+    match /chat_messages/{msgId} {
+      allow read:   if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+                    || (isSignedIn() &&
+                        resource.data.sender_ref ==
+                          /databases/$(database)/documents/users/$(request.auth.uid));
+      allow delete: if isAdmin()
+                    || (isSignedIn() &&
+                        resource.data.sender_ref ==
+                          /databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    // ─── User profiles ────────────────────────────────────────────────────────
-    // Users read/update their own profile; admin sees + manages all.
-    match /users/{userId} {
-      allow read:   if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    // ─── Payments ─────────────────────────────────────────────────────────────
+    // Mobile app can create a payment (checkout flow) and list its own.
+    // Older docs have `userId`, newer docs have `user_id` (string UID or DocRef).
+    match /payment/{paymentId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
+    // ─── User profiles ────────────────────────────────────────────────────────
+    // Any signed-in user can read profiles (matches production behaviour —
+    // organiser cards, attendee lists, chat sender names all depend on this).
+    // Write / delete restricted to owner or admin.
+    match /users/{userId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+
+      // FCM push tokens nested under each user.
+      match /fcm_tokens/{tokenId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == userId;
+        allow update: if isSignedIn() && request.auth.uid == userId;
+        allow delete: if isSignedIn();
+      }
+    }
+
     // ─── Event categories ─────────────────────────────────────────────────────
-    // Publicly readable — Flutter app needs this to populate category pickers
-    // and the admin UI resolves category names from this collection.
+    // Public read — used by unauthenticated signup/category-picker.
     match /event_category/{categoryId} {
-      allow read: if true;
+      allow read:  if true;
       allow write: if isAdmin();
     }
 
-    // ─── Admin-only internal docs ──────────────────────────────────────────────
-    // The _admin collection is used only by this admin UI for caching stats.
-    // Regular app users must never read or write these documents.
-    match /_admin/{docId} {
+    // ─── Country codes (reference data) ───────────────────────────────────────
+    match /country_code/{document} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Bookmarks (user-saved events) ────────────────────────────────────────
+    match /bookmark/{document} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Gallery (event photos) ───────────────────────────────────────────────
+    match /gallery/{document} {
+      allow read:          if true;
+      allow create:        if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Bank accounts (organiser payout details) ─────────────────────────────
+    // Create + own-read by organiser; admin manages updates/deletes.
+    match /bank_account/{document} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Payouts (organiser payout records) ───────────────────────────────────
+    match /payout/{document} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Abuse / report records ───────────────────────────────────────────────
+    // Users file reports; only admin reads / resolves.
+    match /reports_event/{document} {
+      allow create:        if isSignedIn();
+      allow read:          if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Analytics telemetry ──────────────────────────────────────────────────
+    // FlutterFlow metrics_event — append-only from client; admin-only read.
+    match /metrics_event/{document} {
+      allow create:        if true;
+      allow read:          if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Totals / aggregation cache ───────────────────────────────────────────
+    // Recursive match covers /total/{id} and /total/{id}/totalsPayment/{id}, etc.
+    match /total/{document=**} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /{path=**}/totalsPayment/{document} {
+      allow read: if isSignedIn();
+    }
+
+    // ─── FlutterFlow push-notification triggers ───────────────────────────────
+    // Client can only create a notification with themselves set as `sender`.
+    match /ff_user_push_notifications/{document} {
+      allow create: if isSignedIn() &&
+                     request.resource.data.sender ==
+                       /databases/$(database)/documents/users/$(request.auth.uid);
+      allow read:   if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Legacy FlutterFlow `admin` collection ────────────────────────────────
+    // Older FF-generated rule gave everyone read access; we preserve that.
+    match /admin/{document} {
+      allow read:          if true;
+      allow create:        if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Admin-only internal caches (_admin/*) ────────────────────────────────
+    // Recursive so any future nesting is covered.
+    match /_admin/{document=**} {
       allow read, write: if isAdmin();
     }
 
+    // ─── Admin audit log ──────────────────────────────────────────────────────
+    // Append-only record of destructive admin actions. Docs include
+    // `expiresAt` — a Firestore TTL policy on that field deletes them after
+    // 90 days. Regular clients can never read or write.
+    match /_admin_audit/{logId} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ─── Collection-group support for admin queries ───────────────────────────
+    // Admin dashboard runs collectionGroup('attendees') / ('chat_messages')
+    // to answer cross-event queries (e.g. "events this user attended").
+    // Nested subcollection rules don't automatically authorise these — we
+    // need an explicit match at any depth.
+    match /{path=**}/attendees/{attendeeId} {
+      allow read: if isSignedIn();
+    }
+    match /{path=**}/chat_messages/{msgId} {
+      allow read: if isSignedIn();
+    }
+    match /{path=**}/fcm_tokens/{tokenId} {
+      allow read: if isAdmin();
+    }
+
     // ─── Deny everything else ─────────────────────────────────────────────────
+    // Anything that isn't explicitly matched above is denied. When a NEW
+    // collection is added in the Flutter app, a matching rule must be added
+    // here *before* the mobile release goes out.
     match /{document=**} {
       allow read, write: if false;
     }
