@@ -16,6 +16,10 @@ dist-ssr
 !.env.example
 serviceAccount.json
 *serviceAccount*.json
+# Firebase Admin SDK private keys (downloaded from console). These must
+# never be committed — rotate immediately if one ever lands in git.
+*firebase-adminsdk*.json
+*-adminsdk-*.json
 reset_admin.mjs
 
 # Firebase CLI cache (may contain project metadata)
