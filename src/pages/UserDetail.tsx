@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Calendar, CreditCard, Tag, CheckCircle, XCircle,
-  Mail, Shield, Clock, ExternalLink, Megaphone,
+  Mail, Shield, Clock, ExternalLink, Megaphone, Landmark,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Badge from '../components/Badge';
 import {
   fetchUserById, fetchAttendedEventsByUser, fetchPaymentsByUser,
   fetchCategoryMap, fetchEventNames, fetchEventsByOrganiser,
+  getBankAccountByUserId,
 } from '../lib/firestore';
-import type { AppUser, Event, Payment } from '../types';
+import type { AppUser, Event, Payment, BankAccount } from '../types';
 import type { AttendedEventRow } from '../lib/firestore';
 
 const GREEN = '#3d7a5a';
@@ -31,6 +32,7 @@ export default function UserDetail() {
   const [eventNames, setEventNames] = useState<Record<string, string>>({});
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [organised, setOrganised] = useState<Event[] | null>(null);
+  const [bank, setBank] = useState<BankAccount | null | undefined>(undefined); // undefined = not loaded yet
 
   useEffect(() => {
     if (!id) return;
@@ -40,13 +42,15 @@ export default function UserDetail() {
     // the effect body (avoids react-hooks/set-state-in-effect false positive).
     async function load(userId: string) {
       setLoading(true);
+      setBank(undefined);
       try {
-        const [u, cats, evRows, pays, org] = await Promise.all([
+        const [u, cats, evRows, pays, org, ba] = await Promise.all([
           fetchUserById(userId),
           fetchCategoryMap(),
           fetchAttendedEventsByUser(userId),
           fetchPaymentsByUser(userId),
           fetchEventsByOrganiser(userId),
+          getBankAccountByUserId(userId),
         ]);
         if (cancelled) return;
         setUser(u as AppUser | null);
@@ -55,6 +59,7 @@ export default function UserDetail() {
         setEvents(rows);
         setPayments(pays as Payment[]);
         setOrganised(org as Event[]);
+        setBank(ba);
         if (rows.length > 0) {
           const names = await fetchEventNames(rows.map((r) => r.eventId));
           if (!cancelled) setEventNames(names);
@@ -218,6 +223,26 @@ export default function UserDetail() {
               <DLRow icon={<Clock size={14} color="#9ca3af" />} label="Joined" value={fmt(user.createdAt)} />
               <DLRow icon={<Shield size={14} color="#9ca3af" />} label="UID"
                 value={<code style={{ fontSize: 11, color: '#9ca3af' }}>{user.id}</code>} />
+              <DLRow
+                icon={<Landmark size={14} color="#0ea5e9" />}
+                label="Bank account"
+                value={
+                  bank === undefined ? (
+                    <span style={{ color: '#9ca3af' }}>Loading…</span>
+                  ) : bank === null ? (
+                    <span style={{ color: '#9ca3af' }}>No bank account on file</span>
+                  ) : (
+                    <span>
+                      {bank.last4 ? `•••• ${bank.last4}` : 'Linked'}
+                      {bank.bank_account_id && (
+                        <code style={{ marginLeft: 8, fontSize: 11, color: '#9ca3af' }}>
+                          {bank.bank_account_id}
+                        </code>
+                      )}
+                    </span>
+                  )
+                }
+              />
             </dl>
 
             {/* Interests */}

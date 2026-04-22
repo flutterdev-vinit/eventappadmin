@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// Firebase Storage rules for the admin-managed bucket.
+//
+// Only two public-read prefixes are writable, and only by admins (identified
+// by the `admin` custom claim on the Firebase Auth token — same mechanism
+// used by admin/firestore.rules `isAdmin()`).
+//
+// - /categories/*  — category cover images uploaded from the React admin.
+// - /gallery/*     — per-category gallery images uploaded from the React admin.
+//
+// Mobile app reads these URLs freely via getDownloadURL(); writes from
+// anywhere other than the admin UI are denied. The catch-all at the bottom
+// locks down every other path (user avatars etc. are written via the
+// mobile/Flutter apps with their own bucket rules — this file only governs
+// admin-managed paths).
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    match /categories/{allPaths=**} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    match /gallery/{allPaths=**} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

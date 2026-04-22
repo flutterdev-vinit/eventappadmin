@@ -30,11 +30,29 @@ export type AuditActionType =
   | 'user.update'
   | 'user.delete'
   | 'payment.update'
-  | 'payment.delete';
+  | 'payment.delete'
+  | 'category.create'
+  | 'category.update'
+  | 'category.delete'
+  | 'gallery.create'
+  | 'gallery.delete'
+  | 'report.resolve'
+  | 'report.dismiss'
+  | 'payout.create'
+  | 'payout.update';
+
+export type AuditTargetKind =
+  | 'event'
+  | 'user'
+  | 'payment'
+  | 'category'
+  | 'gallery'
+  | 'report'
+  | 'payout';
 
 export interface AuditEntry {
   type: AuditActionType;
-  target: { kind: 'event' | 'user' | 'payment'; id: string; name?: string | null };
+  target: { kind: AuditTargetKind; id: string; name?: string | null };
   metadata?: Record<string, unknown>;
 }
 

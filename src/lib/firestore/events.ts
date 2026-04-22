@@ -348,3 +348,8 @@ export async function fetchCategoryMap(): Promise<Record<string, string>> {
     return {};
   }
 }
+
+/** Clear the in-memory category map cache. Called after category mutations. */
+export function clearCategoryMapCache(): void {
+  _categoryMapCache = null;
+}

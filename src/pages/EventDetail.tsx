@@ -3,14 +3,20 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Users, Ticket, MessageSquare, DollarSign,
   MapPin, Calendar, Globe, Lock, Clock, Tag, User, CheckCircle, XCircle,
+  Flag, Wallet, Plus, Check, X as XIcon,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Badge from '../components/Badge';
 import {
   fetchEventById, fetchAttendeeCountForEvent, fetchCompletedPaymentCountForEvent,
   fetchAttendeesForEvent, fetchCategoryMap, fetchMessageCountForEvent, fetchUserById,
+  getReportsForEvent, resolveReport, dismissReport,
+  listPayouts, updatePayoutStatus,
+  fetchUserNames,
 } from '../lib/firestore';
-import type { Event, AppUser } from '../types';
+import { formatDayMonthYear } from '../lib/dateUtils';
+import { InitiatePayoutModal } from './Payouts';
+import type { Event, AppUser, Report, Payout, PayoutStatus } from '../types';
 import type { AttendeeWithUser } from '../lib/firestore';
 
 const GREEN = '#3d7a5a';
@@ -336,6 +342,169 @@ export default function EventDetail() {
           </div>
         )}
       </div>
+
+      {/* ── Reports for this event ────────────────────────────── */}
+      <EventReportsSection eventId={event.id} />
+
+      {/* ── Payouts for this event ────────────────────────────── */}
+      <EventPayoutsSection eventId={event.id} />
+    </div>
+  );
+}
+
+/* ── Reports section ──────────────────────────────────────────────────── */
+
+function EventReportsSection({ eventId }: { eventId: string }) {
+  const [reports, setReports] = useState<(Report & { reporterName?: string })[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const rows = await getReportsForEvent(eventId);
+      const userIds = rows.map((r) => r.user_id ?? '').filter(Boolean) as string[];
+      const names = await fetchUserNames(userIds);
+      if (cancelled) return;
+      setReports(rows.map((r) => ({ ...r, reporterName: r.user_id ? names[r.user_id] : undefined })));
+    })();
+    return () => { cancelled = true; };
+  }, [eventId, reloadKey]);
+
+  const act = async (r: Report, fn: (id: string) => Promise<void>) => {
+    setBusyId(r.id);
+    try {
+      await fn(r.id);
+      setReloadKey((k) => k + 1);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openCount = (reports ?? []).filter((r) => !r.status || r.status === 'open').length;
+
+  return (
+    <div style={{ ...styles.card, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <h3 style={styles.sectionTitle}>
+          <Flag size={14} color="#dc2626" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          Reports {reports !== null && <span style={{ color: '#6b7280', fontWeight: 500 }}>({openCount} open / {reports.length} total)</span>}
+        </h3>
+      </div>
+      {reports === null ? (
+        <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading…</p>
+      ) : reports.length === 0 ? (
+        <p style={{ color: '#9ca3af', fontSize: 13 }}>No reports filed against this event.</p>
+      ) : (
+        <div>
+          {reports.map((r) => (
+            <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, color: '#111827', whiteSpace: 'pre-wrap' }}>{r.message ?? '—'}</p>
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  {r.reporterName ?? 'Unknown reporter'} · {formatDayMonthYear(r.createdAt ?? r.resolved_at)} · <Badge status={r.status ?? 'open'} />
+                </p>
+              </div>
+              {(!r.status || r.status === 'open') && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button style={styles.smallBtn} disabled={busyId === r.id} onClick={() => void act(r, resolveReport)}>
+                    <Check size={13} color="#16a34a" />
+                  </button>
+                  <button style={styles.smallBtn} disabled={busyId === r.id} onClick={() => void act(r, dismissReport)}>
+                    <XIcon size={13} color="#6b7280" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Payouts section ──────────────────────────────────────────────────── */
+
+function EventPayoutsSection({ eventId }: { eventId: string }) {
+  const [payouts, setPayouts] = useState<Payout[] | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const rows = await listPayouts({ eventId, pageSize: 50 });
+      if (cancelled) return;
+      setPayouts(rows);
+    })();
+    return () => { cancelled = true; };
+  }, [eventId, reloadKey]);
+
+  const mark = async (p: Payout, status: PayoutStatus) => {
+    setBusyId(p.id);
+    try {
+      await updatePayoutStatus(p.id, { status });
+      setReloadKey((k) => k + 1);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const total = (payouts ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0);
+
+  return (
+    <div style={{ ...styles.card, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={styles.sectionTitle}>
+          <Wallet size={14} color={GREEN} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          Payouts {payouts !== null && <span style={{ color: '#6b7280', fontWeight: 500 }}>({payouts.length}, ${total.toFixed(2)} total)</span>}
+        </h3>
+        <button style={styles.smallPrimaryBtn} onClick={() => setShowModal(true)}>
+          <Plus size={13} /> Initiate
+        </button>
+      </div>
+      {payouts === null ? (
+        <p style={{ color: '#9ca3af', fontSize: 13 }}>Loading…</p>
+      ) : payouts.length === 0 ? (
+        <p style={{ color: '#9ca3af', fontSize: 13 }}>No payouts yet for this event.</p>
+      ) : (
+        <div>
+          {payouts.map((p) => (
+            <div key={p.id} style={{ padding: '10px 0', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>${(p.amount ?? 0).toFixed(2)}</p>
+                <p style={{ fontSize: 12, color: '#6b7280' }}>
+                  {formatDayMonthYear(p.createdAt)} · {p.payment_method || 'bank'}
+                  {p.transaction_id ? ` · ${p.transaction_id}` : ''}
+                </p>
+              </div>
+              <Badge status={String(p.status ?? 'pending')} />
+              {(p.status === 'pending' || !p.status) && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button style={styles.smallBtn} disabled={busyId === p.id} onClick={() => void mark(p, 'paid')}>
+                    Mark paid
+                  </button>
+                  <button style={{ ...styles.smallBtn, color: '#dc2626' }} disabled={busyId === p.id} onClick={() => void mark(p, 'failed')}>
+                    Failed
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal && (
+        <InitiatePayoutModal
+          initialEventId={eventId}
+          onClose={() => setShowModal(false)}
+          onCreated={() => {
+            setShowModal(false);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -450,5 +619,15 @@ const styles: Record<string, React.CSSProperties> = {
   skeletonRow: {
     height: 44, borderRadius: 8, background: 'linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%)',
     backgroundSize: '200% 100%', animation: 'shimmer 1.4s ease infinite',
+  },
+  smallBtn: {
+    background: '#fff', border: '1px solid #e5e7eb', color: '#374151',
+    borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+  },
+  smallPrimaryBtn: {
+    background: GREEN, border: 'none', color: '#fff',
+    borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 4,
   },
 };

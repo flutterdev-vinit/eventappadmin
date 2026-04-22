@@ -9,15 +9,30 @@ import {
   BarChart3,
   LogOut,
   X,
+  Tag,
+  Flag,
+  Wallet,
 } from 'lucide-react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth } from '../firebase';
+import { countReportsByStatus } from '../lib/firestore';
 
-const NAV = [
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  /** Optional badge key — resolved to a number by Sidebar. */
+  badge?: 'openReports';
+}
+
+const NAV: NavItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/events', icon: Calendar, label: 'Events' },
   { to: '/users', icon: Users, label: 'Users' },
+  { to: '/categories', icon: Tag, label: 'Categories' },
   { to: '/payments', icon: CreditCard, label: 'Payments' },
+  { to: '/payouts', icon: Wallet, label: 'Payouts' },
+  { to: '/reports', icon: Flag, label: 'Reports', badge: 'openReports' },
   { to: '/messages', icon: MessageSquare, label: 'Messages' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
 ];
@@ -30,15 +45,31 @@ interface Props {
 
 export default function Sidebar({ open, onClose, isMobile }: Props) {
   const [user, setUser] = useState<User | null>(null);
+  const [openReports, setOpenReports] = useState<number>(0);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return unsub;
   }, []);
 
+  // Poll report counts on an interval; also re-runs whenever the sidebar
+  // drawer is re-mounted so counts feel fresh after a moderation action.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const tick = () =>
+      countReportsByStatus()
+        .then((c) => { if (!cancelled) setOpenReports(c.open); })
+        .catch(() => { /* ignore — badge just stays stale */ });
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [user]);
+
   const displayName = user?.displayName ?? 'Admin';
   const email = user?.email ?? '';
   const initials = displayName.trim().charAt(0).toUpperCase();
+  const badgeValues = { openReports };
 
   // On mobile: overlay + slide-in drawer. On desktop: sticky rail.
   if (isMobile) {
@@ -68,6 +99,7 @@ export default function Sidebar({ open, onClose, isMobile }: Props) {
             onNavClick={onClose}
             showClose
             onClose={onClose}
+            badges={badgeValues}
           />
         </aside>
       </>
@@ -83,6 +115,7 @@ export default function Sidebar({ open, onClose, isMobile }: Props) {
         onNavClick={() => {}}
         showClose={false}
         onClose={() => {}}
+        badges={badgeValues}
       />
     </aside>
   );
@@ -95,9 +128,10 @@ interface ContentProps {
   onNavClick: () => void;
   showClose: boolean;
   onClose: () => void;
+  badges: { openReports: number };
 }
 
-function SidebarContent({ displayName, email, initials, onNavClick, showClose, onClose }: ContentProps) {
+function SidebarContent({ displayName, email, initials, onNavClick, showClose, onClose, badges }: ContentProps) {
   const handleSignOut = () => {
     signOut(auth);
   };
@@ -120,25 +154,39 @@ function SidebarContent({ displayName, email, initials, onNavClick, showClose, o
       {/* Nav */}
       <nav style={styles.nav}>
         <p style={styles.navLabel}>MAIN MENU</p>
-        {NAV.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            onClick={onNavClick}
-            style={({ isActive }) => ({
-              ...styles.navItem,
-              ...(isActive ? styles.navItemActive : {}),
-            })}
-          >
-            {({ isActive }) => (
-              <>
-                <Icon size={18} color={isActive ? '#fff' : '#6b7280'} />
-                <span style={{ color: isActive ? '#fff' : '#374151' }}>{label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
+        {NAV.map(({ to, icon: Icon, label, badge }) => {
+          const badgeCount = badge ? badges[badge] : 0;
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              onClick={onNavClick}
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+              })}
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon size={18} color={isActive ? '#fff' : '#6b7280'} />
+                  <span style={{ color: isActive ? '#fff' : '#374151', flex: 1 }}>{label}</span>
+                  {badgeCount > 0 && (
+                    <span
+                      style={{
+                        ...styles.badge,
+                        background: isActive ? 'rgba(255,255,255,0.25)' : '#dc2626',
+                        color: '#fff',
+                      }}
+                    >
+                      {badgeCount > 99 ? '99+' : badgeCount}
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {/* Bottom */}
@@ -278,5 +326,14 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 6,
     borderRadius: 6,
     display: 'flex',
+  },
+  badge: {
+    fontSize: 10,
+    fontWeight: 700,
+    borderRadius: 999,
+    padding: '2px 6px',
+    minWidth: 18,
+    textAlign: 'center' as const,
+    lineHeight: 1.2,
   },
 };

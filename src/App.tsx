@@ -10,14 +10,18 @@ import { useWindowSize } from './hooks/useWindowSize';
 // Route-level code splitting — each page becomes its own JS chunk, fetched
 // on first navigation. Login + AuthGate + Sidebar stay eager because they
 // render before the first route and determine whether anything else loads.
-const Dashboard   = lazy(() => import('./pages/Dashboard'));
-const Events      = lazy(() => import('./pages/Events'));
-const EventDetail = lazy(() => import('./pages/EventDetail'));
-const Users       = lazy(() => import('./pages/Users'));
-const UserDetail  = lazy(() => import('./pages/UserDetail'));
-const Payments    = lazy(() => import('./pages/Payments'));
-const Messages    = lazy(() => import('./pages/Messages'));
-const Analytics   = lazy(() => import('./pages/Analytics'));
+const Dashboard       = lazy(() => import('./pages/Dashboard'));
+const Events          = lazy(() => import('./pages/Events'));
+const EventDetail     = lazy(() => import('./pages/EventDetail'));
+const Users           = lazy(() => import('./pages/Users'));
+const UserDetail      = lazy(() => import('./pages/UserDetail'));
+const Payments        = lazy(() => import('./pages/Payments'));
+const Messages        = lazy(() => import('./pages/Messages'));
+const Analytics       = lazy(() => import('./pages/Analytics'));
+const Categories      = lazy(() => import('./pages/Categories'));
+const CategoryGallery = lazy(() => import('./pages/CategoryGallery'));
+const Reports         = lazy(() => import('./pages/Reports'));
+const Payouts         = lazy(() => import('./pages/Payouts'));
 
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -26,6 +30,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/payments': 'Payments',
   '/messages': 'Messages',
   '/analytics': 'Analytics',
+  '/categories': 'Categories',
+  '/reports': 'Reports',
+  '/payouts': 'Payouts',
 };
 
 export default function App() {
@@ -72,6 +79,10 @@ export default function App() {
                 <Route path="/payments" element={<Payments />} />
                 <Route path="/messages" element={<Messages />} />
                 <Route path="/analytics" element={<Analytics />} />
+                <Route path="/categories" element={<Categories />} />
+                <Route path="/categories/:id/gallery" element={<CategoryGallery />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/payouts" element={<Payouts />} />
               </Routes>
             </Suspense>
           </main>
