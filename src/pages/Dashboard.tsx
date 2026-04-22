@@ -243,7 +243,9 @@ export default function Dashboard() {
                 View all <ArrowRight size={14} />
               </button>
             </div>
-            {recentUsers.length === 0 ? (
+            {loading ? (
+              <p style={styles.dimText}>Loading…</p>
+            ) : recentUsers.length === 0 ? (
               <p style={styles.dimText}>No users found.</p>
             ) : (
               <div>
@@ -278,7 +280,9 @@ export default function Dashboard() {
                 View all <ArrowRight size={14} />
               </button>
             </div>
-            {recentPayments.length === 0 ? (
+            {loading ? (
+              <p style={styles.dimText}>Loading…</p>
+            ) : recentPayments.length === 0 ? (
               <p style={styles.dimText}>No payments yet.</p>
             ) : (
               <div>

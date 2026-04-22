@@ -139,6 +139,7 @@ export default function Categories() {
 
       {editing && (
         <CategoryModal
+          key={editing === 'new' ? '__new__' : editing.id}
           category={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={() => {

@@ -95,10 +95,14 @@ export async function fetchEventsPage(
 
 /**
  * Cross-page name prefix search for Events.
+ * `modeFilter` is applied client-side after the fetch to avoid requiring
+ * an extra composite index (name range + mode). Results are capped at 60
+ * so the in-memory filter is cheap.
  */
 export async function searchEvents(
   term: string,
   statusFilter: 'all' | 'published' | 'draft' = 'all',
+  modeFilter = '',
 ): Promise<Event[]> {
   if (!term.trim()) return [];
   const lo = term.trim();
@@ -113,7 +117,9 @@ export async function searchEvents(
     if (statusFilter === 'published') constraints.push(where('is_published', '==', true));
     if (statusFilter === 'draft')     constraints.push(where('is_published', '==', false));
     const snap = await getDocs(query(collection(db, 'Event'), ...constraints));
-    return snap.docs.map((d) => sanitizeDoc<Event>(d.id, d.data()));
+    let results = snap.docs.map((d) => sanitizeDoc<Event>(d.id, d.data()));
+    if (modeFilter) results = results.filter((ev) => ev.mode === modeFilter);
+    return results;
   } catch {
     return [];
   }

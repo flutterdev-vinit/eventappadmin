@@ -171,7 +171,7 @@ export default function Payouts() {
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 600 }}>All payouts</h2>
             <p style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>
-              {loading ? 'Loading…' : `${items.length} on this page`}
+              {loading ? 'Loading…' : `${items.length} result${items.length === 1 ? '' : 's'} (most recent 50)`}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

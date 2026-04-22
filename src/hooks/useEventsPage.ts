@@ -140,7 +140,7 @@ export function useEventsPage(): UseEventsPageReturn {
     setSearchLoading(true);
     setSearchMode(true);
     try {
-      const results = await searchEvents(term, statusRef.current);
+      const results = await searchEvents(term, statusRef.current, modeRef.current);
       setSearchResults(results);
     } catch (e) {
       console.error(e);

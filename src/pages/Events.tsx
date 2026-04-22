@@ -53,6 +53,7 @@ export default function Events() {
   const resetFilters = () => {
     setSearch('');
     setMode('');
+    setStatus('all');
     setMinPrice('');
     setMaxPrice('');
     if (searchMode) exitSearchMode();
@@ -179,7 +180,10 @@ export default function Events() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#e8f5ee', borderRadius: 8, margin: '8px 0', fontSize: 13 }}>
             <Search size={14} color="#3d7a5a" />
             <span style={{ color: '#3d7a5a', fontWeight: 500 }}>
-              Showing all events matching "{search}" — prefix search, case-sensitive
+              Searching all events for "{search}"
+              {status !== 'all' ? ` · ${status}` : ''}
+              {mode ? ` · ${mode}` : ''}
+              {' '}— prefix match
             </span>
             <button onClick={exitSearchMode} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#3d7a5a', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
               Back to browse ×
