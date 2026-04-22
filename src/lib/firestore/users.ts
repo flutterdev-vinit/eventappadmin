@@ -169,11 +169,38 @@ export async function fetchUsersPage(
   }
 }
 
+/**
+ * Translate a camelCase `Partial<AppUser>` patch into the snake_case field
+ * names actually stored in Firestore. The read path already maps the other
+ * way (see `sanitizeUser`); without this write-side mapper, callers that
+ * pass `displayName` / `createdAt` would silently create stray camelCase
+ * fields that the Flutter mobile apps never read.
+ *
+ * Fields whose keys are identical on both sides (`status`, `role`, `email`,
+ * `photoURL`) pass through unchanged. `id` is never written. Unknown or
+ * `undefined` values are dropped so we never write `undefined` to Firestore.
+ */
+export function toFirestoreUserPatch(
+  data: Partial<AppUser>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (data.displayName !== undefined) out.first_name = data.displayName;
+  if (data.createdAt !== undefined) out.created_time = data.createdAt;
+  if (data.status !== undefined) out.status = data.status;
+  if (data.role !== undefined) out.role = data.role;
+  if (data.email !== undefined) out.email = data.email;
+  if (data.photoURL !== undefined) out.photoURL = data.photoURL;
+  return out;
+}
+
 export async function updateUser(id: string, data: Partial<AppUser>): Promise<void> {
-  await updateDoc(doc(db, 'users', id), data);
+  const patch = toFirestoreUserPatch(data);
+  if (Object.keys(patch).length > 0) {
+    await updateDoc(doc(db, 'users', id), patch);
+  }
   await logAdminAction({
     type: 'user.update',
-    target: { kind: 'user', id, name: (data.displayName as string | undefined) ?? null },
-    metadata: { changedFields: Object.keys(data) },
+    target: { kind: 'user', id, name: data.displayName ?? null },
+    metadata: { changedFields: Object.keys(patch) },
   });
 }

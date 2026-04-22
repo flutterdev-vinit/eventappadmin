@@ -1,23 +1,44 @@
 rules_version = '2';
 
-// Firebase Storage rules for the admin-managed bucket.
+// Firebase Storage rules — REFERENCE FILE, NOT DEPLOYED FROM THIS REPO.
 //
-// Only two public-read prefixes are writable, and only by admins (identified
-// by the `admin` custom claim on the Firebase Auth token — same mechanism
-// used by admin/firestore.rules `isAdmin()`).
+// A Storage bucket has exactly ONE rules file governing all paths in it, so
+// whoever deploys rules to `event-app-880a3.appspot.com` is effectively the
+// source of truth for both the admin-managed paths AND every path the mobile
+// Flutter apps write to. To avoid accidentally overwriting whatever is
+// currently live, this file is intentionally **not** wired into
+// `admin/firebase.json` — the CI pipeline (`.github/workflows/deploy.yml`)
+// only ships `firestore:rules` and hosting.
 //
-// - /categories/*  — category cover images uploaded from the React admin.
-// - /gallery/*     — per-category gallery images uploaded from the React admin.
+// It is kept here as a documented template so that any future owner of the
+// Storage rules can diff it against the live ruleset and bring the two into
+// alignment. If you re-enable Storage deploys from this repo, first run
+// `firebase storage:rules:get` and diff.
 //
-// Mobile app reads these URLs freely via getDownloadURL(); writes from
-// anywhere other than the admin UI are denied. The catch-all at the bottom
-// locks down every other path (user avatars etc. are written via the
-// mobile/Flutter apps with their own bucket rules — this file only governs
-// admin-managed paths).
+// Paths covered (matches production mobile + admin behaviour):
+//
+//   /categories/**                 admin write, public read
+//     Written by the React admin (admin/src/lib/firestore/storage.ts).
+//
+//   /gallery/**                    admin write, public read
+//     Written by the React admin.
+//
+//   /users/{uid}/uploads/**        owner write, signed-in read
+//     Written by both Flutter apps via `uploadData(path, bytes)` in
+//     `event-app/lib/backend/firebase_storage/storage.dart` /
+//     `event-dashboard/lib/backend/firebase_storage/storage.dart`. The path
+//     prefix comes from `_firebasePathPrefix() => 'users/$currentUserUid/uploads'`
+//     in each app's `flutter_flow/upload_data.dart`.
+//
+// Everything else is denied by the terminal catch-all.
 service firebase.storage {
   match /b/{bucket}/o {
     function isAdmin() {
       return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
     match /categories/{allPaths=**} {
@@ -28,6 +49,14 @@ service firebase.storage {
     match /gallery/{allPaths=**} {
       allow read:  if true;
       allow write: if isAdmin();
+    }
+
+    // Mobile-owned uploads. Owner (`request.auth.uid == uid`) may write; any
+    // signed-in user may read (profile photos are shown to other users in
+    // attendee lists, organiser cards, chat threads).
+    match /users/{uid}/uploads/{allPaths=**} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
     }
 
     match /{allPaths=**} {
