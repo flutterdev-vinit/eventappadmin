@@ -196,6 +196,8 @@ firebase deploy --only firestore:rules,hosting
 
 **Never** run `firebase deploy --only firestore:indexes --force` — this wipes all console-managed indexes. If an index needs changing, edit `firestore.indexes.json`, diff with `firebase firestore:indexes`, then deploy with `--only firestore:indexes` (no `--force`).
 
+**Storage rules are reference-only in this repo.** `storage.rules` documents the full contract (admin-owned `/categories/**` + `/gallery/**`, mobile-owned `/users/{uid}/uploads/**`), but it is **intentionally not wired into `firebase.json`** — production Storage rules are managed out-of-band, and shipping this file from here would overwrite them. Do **not** run `firebase deploy --only storage` from this repo without first running `firebase storage:rules:get` and diffing against the live rules.
+
 **Never commit** `.env`, service account JSON files, or private keys—see **`.gitignore`**.
 
 ---
@@ -217,6 +219,17 @@ Granting admin access in **production** should be a deliberate, audited step (Ad
 - **Same Firestore database** and **same Auth project** as Flutter.
 - Schema assumptions (collection names, field shapes, `DocumentReference` vs string IDs) are implemented in **`lib/firestore/`** with fallbacks where data is inconsistent.
 - **Changing Firestore rules** here affects **all clients** immediately after deploy—coordinate with mobile releases when tightening rules.
+
+### Adding a new mobile collection (release ordering)
+
+The Firestore rules file ends with `match /{document=**} { allow read, write: if false; }`. That terminal deny means any collection the mobile apps start writing to **after** the next admin rules deploy will be rejected unless a matching rule is already live. To avoid a mobile outage, follow this order:
+
+1. Mobile PR lands in `event-app` / `event-dashboard` introducing the new collection (can be merged but **not yet tagged for release**).
+2. Admin PR lands in this repo adding the explicit `match /<collection>/{id} { … }` block in `firestore.rules`. Use the existing admin-only collections (`_admin/**`, `_admin_audit`, `_admin_errors`) as templates.
+3. Admin `main` pipeline deploys — rules go live.
+4. Mobile release is tagged and rolled out.
+
+Reversing step 1 and step 4 (shipping the mobile release before step 3) will cause `permission-denied` for every user on the new path. There is no rollback other than re-deploying rules.
 
 ### Collections the rules cover
 
@@ -330,6 +343,12 @@ curl -X PATCH \
 ```
 
 `logClientError` is fire-and-forget — if Firestore is unreachable, it logs a `console.warn` but never throws, so a broken logger can't itself crash the app.
+
+### Known follow-ups
+
+- **`deleteEvent` leaves subcollections orphaned.** `updateDoc(doc(db, 'Event', id))` followed by `deleteDoc` in `src/lib/firestore/events.ts` removes the top-level `Event` document but does **not** cascade into `Event/{id}/attendees` or `Event/{id}/chat_messages`. This is not a user-facing break — the mobile apps query the `Event` collection first, so orphans are invisible — but it is storage bloat. Fix options (either is acceptable, neither is in the current scope):
+  - Client-side batch delete loop in `deleteEvent` that pages through both subcollections before removing the parent. Requires careful paging for events with thousands of attendees / messages.
+  - A Cloud Function on `Event` `onDelete` living in `firebase-functions/` that recursively deletes. Bypasses security rules, runs server-side, simpler to reason about.
 
 ---
 
