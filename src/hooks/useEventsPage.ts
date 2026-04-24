@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import {
-  fetchEventsPage, updateEvent, deleteEvent,
+  fetchEventsPage, deleteEvent,
   fetchAttendeeCountForEvent, fetchCompletedPaymentCountForEvent,
   searchEvents, fetchCategoryMap,
 } from '../lib/firestore';
@@ -51,7 +51,6 @@ export interface UseEventsPageReturn {
   displayItems: Event[];
 
   // Mutations
-  togglePublish: (ev: Event) => Promise<void>;
   handleDelete: (ev: Event) => Promise<void>;
 }
 
@@ -140,7 +139,7 @@ export function useEventsPage(): UseEventsPageReturn {
     setSearchLoading(true);
     setSearchMode(true);
     try {
-      const results = await searchEvents(term, statusRef.current);
+      const results = await searchEvents(term, statusRef.current, modeRef.current);
       setSearchResults(results);
     } catch (e) {
       console.error(e);
@@ -206,20 +205,6 @@ export function useEventsPage(): UseEventsPageReturn {
     setSelectedPaidCount(null);
   }, []);
 
-  const togglePublish = useCallback(
-    async (ev: Event) => {
-      await updateEvent(ev.id, { is_published: !ev.is_published });
-      if (!searchModeRef.current) {
-        cursors.current = [null];
-        loadPage(1);
-      } else {
-        // Keep search results in sync visually
-        setSearchResults((prev) => prev.map((e) => e.id === ev.id ? { ...e, is_published: !ev.is_published } : e));
-      }
-    },
-    [loadPage],
-  );
-
   // Preserve the original UX: confirm() dialog before deletion,
   // plus in-memory removal from search results when in search mode.
   const handleDelete = useCallback(
@@ -277,7 +262,6 @@ export function useEventsPage(): UseEventsPageReturn {
     displayItems,
 
     // Mutations
-    togglePublish,
     handleDelete,
   };
 }

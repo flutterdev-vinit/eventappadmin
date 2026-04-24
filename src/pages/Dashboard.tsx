@@ -24,6 +24,7 @@ import {
 import type { Event, Payment, AppUser } from '../types';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { buildMonthlyEventData, formatDayMonthYear } from '../lib/dateUtils';
+import { formatGbp } from '../lib/formatMoney';
 
 const PIE_COLORS = ['#3d7a5a', '#93c9a8'];
 
@@ -111,7 +112,7 @@ export default function Dashboard() {
     },
     {
       label: 'Total Revenue',
-      value: loading ? '—' : `$${(stats?.totalRevenue ?? 0).toLocaleString()}`,
+      value: loading ? '—' : formatGbp(stats?.totalRevenue ?? 0),
       sub: `${stats?.totalPayments ?? 0} transactions`,
       icon: <CreditCard size={22} color="#d97706" />,
       iconBg: '#fef3c7',
@@ -243,7 +244,9 @@ export default function Dashboard() {
                 View all <ArrowRight size={14} />
               </button>
             </div>
-            {recentUsers.length === 0 ? (
+            {loading ? (
+              <p style={styles.dimText}>Loading…</p>
+            ) : recentUsers.length === 0 ? (
               <p style={styles.dimText}>No users found.</p>
             ) : (
               <div>
@@ -278,7 +281,9 @@ export default function Dashboard() {
                 View all <ArrowRight size={14} />
               </button>
             </div>
-            {recentPayments.length === 0 ? (
+            {loading ? (
+              <p style={styles.dimText}>Loading…</p>
+            ) : recentPayments.length === 0 ? (
               <p style={styles.dimText}>No payments yet.</p>
             ) : (
               <div>
@@ -297,7 +302,7 @@ export default function Dashboard() {
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <p style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>
-                        ${(p.amount ?? 0).toFixed(2)}
+                        {formatGbp(p.amount ?? 0)}
                       </p>
                       <Badge status={p.status ?? 'pending'} />
                     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, X, DollarSign, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { Plus, X, PoundSterling, CheckCircle, Clock, XCircle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/Table';
 import StatCard from '../components/StatCard';
@@ -17,6 +17,7 @@ import {
   type PayoutCounts,
 } from '../lib/firestore';
 import { formatDayMonthYear } from '../lib/dateUtils';
+import { formatGbp } from '../lib/formatMoney';
 import { useWindowSize } from '../hooks/useWindowSize';
 import type { Payout, PayoutStatus } from '../types';
 
@@ -92,7 +93,7 @@ export default function Payouts() {
 
   const statsGridCols = isMobile ? 'repeat(2, 1fr)' : isTablet ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)';
   const statCards = useMemo(() => [
-    { label: 'Total Payouts', value: counts.total.toLocaleString(), icon: <DollarSign size={22} color="#3d7a5a" />, iconBg: '#e8f5ee' },
+    { label: 'Total Payouts', value: counts.total.toLocaleString(), icon: <PoundSterling size={22} color="#3d7a5a" />, iconBg: '#e8f5ee' },
     { label: 'Paid',     value: counts.paid.toLocaleString(),     icon: <CheckCircle size={22} color="#16a34a" />, iconBg: '#dcfce7' },
     { label: 'Pending',  value: counts.pending.toLocaleString(),  icon: <Clock       size={22} color="#d97706" />, iconBg: '#fef3c7' },
     { label: 'Failed / Cancelled', value: (counts.failed + counts.cancelled).toLocaleString(), icon: <XCircle size={22} color="#dc2626" />, iconBg: '#fee2e2' },
@@ -123,7 +124,7 @@ export default function Payouts() {
       key: 'amount',
       header: 'Amount',
       align: 'right' as const,
-      render: (p: EnrichedPayout) => <strong>${(p.amount ?? 0).toFixed(2)}</strong>,
+      render: (p: EnrichedPayout) => <strong>{formatGbp(p.amount ?? 0)}</strong>,
     },
     {
       key: 'status',
@@ -171,7 +172,7 @@ export default function Payouts() {
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 600 }}>All payouts</h2>
             <p style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>
-              {loading ? 'Loading…' : `${items.length} on this page`}
+              {loading ? 'Loading…' : `${items.length} result${items.length === 1 ? '' : 's'} (most recent 50)`}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -323,7 +324,7 @@ export function InitiatePayoutModal({ initialEventId, onClose, onCreated }: Moda
             />
           </label>
           <label style={styles.label}>
-            Amount (USD)
+            Amount (GBP)
             <input
               type="number"
               step="0.01"
