@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, RotateCcw, Eye, Trash2, ToggleLeft, ToggleRight, X, ExternalLink } from 'lucide-react';
+import { Search, RotateCcw, Eye, Trash2, X, ExternalLink } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Badge from '../components/Badge';
 import DataTable from '../components/Table';
@@ -10,6 +10,7 @@ import type { Event } from '../types';
 import { formatDayMonthYear } from '../lib/dateUtils';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { useEventsPage, type StatusFilter } from '../hooks/useEventsPage';
+import { formatGbp } from '../lib/formatMoney';
 
 // Fixed list of event modes — not derived from current page so mode filter
 // works even when a mode doesn't appear on the first page of results.
@@ -46,7 +47,6 @@ export default function Events() {
     selectedPaidCount,
     catMap,
     displayItems,
-    togglePublish,
     handleDelete,
   } = useEventsPage();
 
@@ -96,7 +96,7 @@ export default function Events() {
       key: 'price',
       header: 'Price',
       align: 'right' as const,
-      render: (ev: Event) => ev.is_paid ? `$${(ev.price ?? 0).toFixed(2)}` : 'Free',
+      render: (ev: Event) => ev.is_paid ? formatGbp(ev.price ?? 0) : 'Free',
     },
     {
       key: 'is_published',
@@ -116,13 +116,6 @@ export default function Events() {
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <ActionBtn title="Quick view" onClick={() => openSelected(ev)} icon={<Eye size={14} />} />
           <ActionBtn title="Full details" onClick={() => navigate(`/events/${ev.id}`)} icon={<ExternalLink size={14} color="#6366f1" />} />
-          <ActionBtn
-            title={ev.is_published ? 'Unpublish' : 'Publish'}
-            onClick={() => togglePublish(ev)}
-            icon={ev.is_published
-              ? <ToggleRight size={14} color="#3d7a5a" />
-              : <ToggleLeft size={14} color="#9ca3af" />}
-          />
           <ActionBtn title="Delete" onClick={() => handleDelete(ev)} icon={<Trash2 size={14} color="#dc2626" />} danger />
         </div>
       ),
@@ -308,7 +301,7 @@ export default function Events() {
             <DL label="Start" value={formatDayMonthYear(selected.startDate)} />
             <DL label="End" value={formatDayMonthYear(selected.endDate)} />
             <DL label="Private" value={selected.is_private ? 'Yes — invite only' : 'Public'} />
-            <DL label="Price" value={selected.is_paid ? `$${selected.price}` : 'Free'} />
+            <DL label="Price" value={selected.is_paid ? formatGbp(selected.price ?? 0) : 'Free'} />
             {selected.description && <DL label="Description" value={selected.description} />}
           </dl>
         </Modal>

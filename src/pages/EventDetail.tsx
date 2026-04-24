@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Users, Ticket, MessageSquare, DollarSign,
+  ArrowLeft, Users, Ticket, MessageSquare, PoundSterling,
   MapPin, Calendar, Globe, Lock, Clock, Tag, User, CheckCircle, XCircle,
   Flag, Wallet, Plus, Check, X as XIcon,
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
   fetchUserNames,
 } from '../lib/firestore';
 import { formatDayMonthYear } from '../lib/dateUtils';
+import { formatGbp } from '../lib/formatMoney';
 import { InitiatePayoutModal } from './Payouts';
 import type { Event, AppUser, Report, Payout, PayoutStatus } from '../types';
 import type { AttendeeWithUser } from '../lib/firestore';
@@ -149,7 +150,7 @@ export default function EventDetail() {
               )}
               {event.is_paid && (
                 <span style={{ ...styles.chip, background: '#dbeafe', color: '#1e40af' }}>
-                  <DollarSign size={10} /> Paid · ${event.price ?? 0}
+                  <PoundSterling size={10} /> Paid · {formatGbp(event.price ?? 0)}
                 </span>
               )}
             </div>
@@ -175,7 +176,7 @@ export default function EventDetail() {
       <div style={styles.statsRow}>
         <StatCard icon={<Users size={18} color={GREEN} />} label="Attendees" value={attendeeCount ?? '…'} color={LIGHT_GREEN} />
         <StatCard icon={<Ticket size={18} color="#6366f1" />} label="Invited" value={inviteeCount} color="#eef2ff" />
-        <StatCard icon={<DollarSign size={18} color="#f59e0b" />} label="Paid Tickets" value={paidCount ?? '…'} color="#fffbeb" />
+        <StatCard icon={<PoundSterling size={18} color="#f59e0b" />} label="Paid Tickets" value={paidCount ?? '…'} color="#fffbeb" />
         <StatCard icon={<MessageSquare size={18} color="#2563eb" />} label="Messages" value={messageCount ?? '…'} color="#dbeafe" />
       </div>
 
@@ -458,7 +459,7 @@ function EventPayoutsSection({ eventId }: { eventId: string }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8, flexWrap: 'wrap' }}>
         <h3 style={styles.sectionTitle}>
           <Wallet size={14} color={GREEN} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          Payouts {payouts !== null && <span style={{ color: '#6b7280', fontWeight: 500 }}>({payouts.length}, ${total.toFixed(2)} total)</span>}
+          Payouts {payouts !== null && <span style={{ color: '#6b7280', fontWeight: 500 }}>({payouts.length}, {formatGbp(total)} total)</span>}
         </h3>
         <button style={styles.smallPrimaryBtn} onClick={() => setShowModal(true)}>
           <Plus size={13} /> Initiate
@@ -473,7 +474,7 @@ function EventPayoutsSection({ eventId }: { eventId: string }) {
           {payouts.map((p) => (
             <div key={p.id} style={{ padding: '10px 0', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 160 }}>
-                <p style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>${(p.amount ?? 0).toFixed(2)}</p>
+                <p style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{formatGbp(p.amount ?? 0)}</p>
                 <p style={{ fontSize: 12, color: '#6b7280' }}>
                   {formatDayMonthYear(p.createdAt)} · {p.payment_method || 'bank'}
                   {p.transaction_id ? ` · ${p.transaction_id}` : ''}

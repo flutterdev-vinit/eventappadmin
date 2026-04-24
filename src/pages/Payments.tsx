@@ -1,4 +1,4 @@
-import { DollarSign, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { PoundSterling, CheckCircle, Clock, XCircle } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
@@ -9,6 +9,7 @@ import DataTable from '../components/Table';
 import EntityLink from '../components/EntityLink';
 import { PAGE_SIZE } from '../lib/firestore';
 import { formatDayMonthYear } from '../lib/dateUtils';
+import { formatGbp } from '../lib/formatMoney';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { usePaymentsPage } from '../hooks/usePaymentsPage';
 import type { EnrichedPayment, StatusFilter } from '../hooks/usePaymentsPage';
@@ -41,9 +42,9 @@ export default function Payments() {
   const statCards = [
     {
       label: 'Total Revenue',
-      value: statsLoading ? '—' : `$${totalRevenue.toLocaleString()}`,
+      value: statsLoading ? '—' : formatGbp(totalRevenue),
       sub: 'completed payments',
-      icon: <DollarSign size={22} color="#3d7a5a" />,
+      icon: <PoundSterling size={22} color="#3d7a5a" />,
       iconBg: '#e8f5ee',
     },
     {
@@ -95,7 +96,7 @@ export default function Payments() {
         return <span style={{ color: '#9ca3af' }}>—</span>;
       },
     },
-    { key: 'amount', header: 'Amount', align: 'right' as const, render: (p: EnrichedPayment) => <strong>${(p.amount ?? 0).toFixed(2)}</strong> },
+    { key: 'amount', header: 'Amount', align: 'right' as const, render: (p: EnrichedPayment) => <strong>{formatGbp(p.amount ?? 0)}</strong> },
     { key: 'status', header: 'Status', render: (p: EnrichedPayment) => <Badge status={p.status ?? 'pending'} /> },
     { key: 'date', header: 'Date', render: (p: EnrichedPayment) => formatDayMonthYear(p.date) },
   ];
@@ -121,8 +122,8 @@ export default function Payments() {
               <BarChart data={monthlyRevenue} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                <Tooltip formatter={(v) => [`$${Number(v).toFixed(2)}`, 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                <YAxis tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatGbp(Number(v))} />
+                <Tooltip formatter={(v) => [formatGbp(Number(v)), 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
                 <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
                   {monthlyRevenue.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
                 </Bar>

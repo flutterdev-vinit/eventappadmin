@@ -386,7 +386,7 @@ export function useEventsPage() {
     searchMode, searchResults, triggerSearch, exitSearchMode,
     selected, setSelected, fetchEventCounts,
     catMap, displayItems,
-    togglePublish, handleDelete,
+    handleDelete,
   };
 }
 

@@ -13,6 +13,7 @@ import {
 } from '../lib/firestore';
 import type { AppUser, Event, Payment, BankAccount } from '../types';
 import type { AttendedEventRow } from '../lib/firestore';
+import { formatGbp } from '../lib/formatMoney';
 
 const GREEN = '#3d7a5a';
 const LIGHT_GREEN = '#e8f5ee';
@@ -177,7 +178,7 @@ export default function UserDetail() {
         />
         <StatCard
           label="Total Paid"
-          value={payments === null ? '…' : `$${totalPaid.toFixed(2)}`}
+          value={payments === null ? '…' : formatGbp(totalPaid)}
           color="#fffbeb"
           textColor="#b45309"
         />
@@ -390,7 +391,7 @@ export default function UserDetail() {
             ) : (
               <>
                 <div style={{ padding: '8px 12px', background: '#f9fafb', borderRadius: 8, marginBottom: 12, fontSize: 13, color: '#6b7280' }}>
-                  Total completed payments: <strong style={{ color: '#111827' }}>${totalPaid.toFixed(2)}</strong>
+                  Total completed payments: <strong style={{ color: '#111827' }}>{formatGbp(totalPaid)}</strong>
                 </div>
                 <div style={styles.tableHeader}>
                   <span style={{ flex: 1.5 }}>Date</span>
@@ -400,7 +401,7 @@ export default function UserDetail() {
                 {payments.map((p) => (
                   <div key={p.id} style={styles.tableRow}>
                     <span style={{ flex: 1.5, fontSize: 13, color: '#6b7280' }}>{fmt(p.date)}</span>
-                    <strong style={{ flex: 1, fontSize: 14, color: '#111827' }}>${(p.amount ?? 0).toFixed(2)}</strong>
+                    <strong style={{ flex: 1, fontSize: 14, color: '#111827' }}>{formatGbp(p.amount ?? 0)}</strong>
                     <div style={{ flex: 1 }}>
                       <Badge status={p.status ?? 'pending'} />
                     </div>

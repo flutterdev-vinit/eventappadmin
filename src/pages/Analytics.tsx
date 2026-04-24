@@ -8,6 +8,7 @@ import PageHeader from '../components/PageHeader';
 import EntityLink from '../components/EntityLink';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { useAnalyticsCharts } from '../hooks/useAnalyticsCharts';
+import { formatGbp } from '../lib/formatMoney';
 
 const COLORS = ['#3d7a5a', '#2563eb', '#d97706', '#7c3aed', '#16a34a', '#dc2626', '#0891b2'];
 
@@ -79,8 +80,8 @@ export default function Analytics() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                  <Tooltip formatter={(v) => [`$${Number(v)}`, 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatGbp(Number(v))} />
+                  <Tooltip formatter={(v) => [formatGbp(Number(v)), 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
                   <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={2} fill="url(#revGrad)" name="Revenue" />
                 </AreaChart>
               </ResponsiveContainer>
@@ -134,9 +135,9 @@ export default function Analytics() {
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={revByCategory} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                  <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatGbp(Number(v))} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#374151' }} axisLine={false} tickLine={false} width={90} />
-                  <Tooltip formatter={(v) => [`$${Number(v)}`, 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                  <Tooltip formatter={(v) => [formatGbp(Number(v)), 'Revenue']} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
                   <Bar dataKey="revenue" radius={[0, 4, 4, 0]} name="Revenue">
                     {revByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                   </Bar>
